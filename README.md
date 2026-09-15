@@ -76,4 +76,5 @@ Ao conectar, um **backfill** é enfileirado; depois o worker roda sync
 - [x] Conexões: OAuth (GitHub/GitLab) + PAT (self-hosted)
 - [x] Ingestão idempotente + rollups + worker/agendador
 - [x] Feed unificado (filtros) + heatmap agregado + stats
+- [x] Heatmap anual: GitHub (GraphQL `contributionsCollection`) e GitLab (`calendar.json`)
 - [ ] Refresh de token OAuth, observabilidade, Bitbucket/Gitea

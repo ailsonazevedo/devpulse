@@ -4,6 +4,7 @@ import {
   AuthError,
   type ActivityPage,
   type Credentials,
+  type DailyCount,
   type Identity,
   type NormalizedActivity,
   type ProviderAdapter,
@@ -143,6 +144,42 @@ export const gitlabAdapter: ProviderAdapter = {
     } catch (err) {
       throw asAuthError(err);
     }
+  },
+
+  async fetchContributionCalendar(creds: Credentials): Promise<DailyCount[]> {
+    const host = hostOf(creds);
+    const api = makeClient(creds);
+    let username: string;
+    try {
+      const user = (await api.Users.showCurrentUser()) as unknown as {
+        username: string;
+      };
+      username = user.username;
+    } catch (err) {
+      throw asAuthError(err);
+    }
+
+    // Endpoint web do calendário de atividades: { "YYYY-MM-DD": count } (~1 ano).
+    // Bearer autentica tanto PAT quanto OAuth; contribuições públicas sempre
+    // retornam, privadas conforme a configuração de perfil do usuário.
+    const url = `${host}/users/${encodeURIComponent(username)}/calendar.json`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${creds.accessToken}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new AuthError("GitLab: token inválido ou sem permissão");
+      }
+      throw new Error(`GitLab calendar.json: HTTP ${res.status}`);
+    }
+    const map = (await res.json()) as Record<string, number>;
+    return Object.entries(map).map(([date, count]) => ({
+      date,
+      count: Number(count),
+    }));
   },
 };
 

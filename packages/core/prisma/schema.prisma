@@ -20,6 +20,7 @@ model User {
   sessions    Session[]
   connections ProviderConnection[]
   activities  Activity[]
+  dailyContributions DailyContribution[]
 }
 
 // Auth.js (NextAuth) Prisma adapter models
@@ -142,6 +143,7 @@ model Activity {
 
 model DailyContribution {
   userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date     DateTime // dia normalizado (00:00 UTC)
   provider Provider
   count    Int      @default(0)

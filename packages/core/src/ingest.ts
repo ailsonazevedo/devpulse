@@ -81,11 +81,17 @@ export async function syncConnection(
       if (page.nextCursor) latestCursor = page.nextCursor;
     }
 
-    // Heatmap: se o provedor expõe calendário autoritativo (GitHub GraphQL),
-    // usa-o (ano cheio, inclui privadas); senão deriva das atividades.
-    if (adapter.fetchContributionCalendar) {
-      const days = await adapter.fetchContributionCalendar(creds);
-      await writeCalendarRollups(connection.userId, connection.provider, days);
+    // Heatmap: se o provedor expõe um calendário autoritativo COM dados
+    // (ex.: GitHub GraphQL; GitLab.com público), usa-o (ano cheio, inclui
+    // privadas). Se o calendário vier vazio — comum em GitLab self-hosted, onde
+    // o calendar.json web não expõe contribuições privadas — cai no rollup
+    // derivado das atividades já ingeridas (que via PAT incluem projetos
+    // privados). Provedores sem calendário usam sempre o rollup por atividade.
+    const calendar = adapter.fetchContributionCalendar
+      ? await adapter.fetchContributionCalendar(creds)
+      : null;
+    if (calendar && calendar.some((d) => d.count > 0)) {
+      await writeCalendarRollups(connection.userId, connection.provider, calendar);
     } else if (earliest) {
       await recomputeRollups(connection.userId, connection.provider, earliest);
     }
