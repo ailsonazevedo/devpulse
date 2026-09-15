@@ -1,5 +1,10 @@
-import { Prisma } from "@prisma/client";
-import { getAdapter, AuthError, type Credentials } from "./adapters/index.js";
+import { Prisma, type Provider } from "@prisma/client";
+import {
+  getAdapter,
+  AuthError,
+  type Credentials,
+  type DailyCount,
+} from "./adapters/index.js";
 import { decryptSecret } from "./crypto.js";
 import { prisma } from "./db.js";
 
@@ -76,7 +81,12 @@ export async function syncConnection(
       if (page.nextCursor) latestCursor = page.nextCursor;
     }
 
-    if (earliest) {
+    // Heatmap: se o provedor expõe calendário autoritativo (GitHub GraphQL),
+    // usa-o (ano cheio, inclui privadas); senão deriva das atividades.
+    if (adapter.fetchContributionCalendar) {
+      const days = await adapter.fetchContributionCalendar(creds);
+      await writeCalendarRollups(connection.userId, connection.provider, days);
+    } else if (earliest) {
       await recomputeRollups(connection.userId, connection.provider, earliest);
     }
 
@@ -110,7 +120,7 @@ export async function syncConnection(
  */
 async function recomputeRollups(
   userId: string,
-  provider: "GITHUB" | "GITLAB",
+  provider: Provider,
   since: Date,
 ): Promise<void> {
   await prisma.$executeRaw`
@@ -128,4 +138,36 @@ async function recomputeRollups(
     ON CONFLICT ("userId", "date", "provider")
     DO UPDATE SET "count" = EXCLUDED."count";
   `;
+}
+
+/**
+ * Grava o calendário autoritativo no DailyContribution do provedor. Substitui
+ * o intervalo coberto (delete + insert) para refletir exatamente o calendário.
+ */
+async function writeCalendarRollups(
+  userId: string,
+  provider: Provider,
+  days: DailyCount[],
+): Promise<void> {
+  if (days.length === 0) return;
+  const toDate = (s: string) => new Date(`${s}T00:00:00.000Z`);
+  const dates = days.map((d) => toDate(d.date).getTime());
+  const min = new Date(Math.min(...dates));
+  const max = new Date(Math.max(...dates));
+
+  await prisma.$transaction([
+    prisma.dailyContribution.deleteMany({
+      where: { userId, provider, date: { gte: min, lte: max } },
+    }),
+    prisma.dailyContribution.createMany({
+      data: days
+        .filter((d) => d.count > 0)
+        .map((d) => ({
+          userId,
+          provider,
+          date: toDate(d.date),
+          count: d.count,
+        })),
+    }),
+  ]);
 }
