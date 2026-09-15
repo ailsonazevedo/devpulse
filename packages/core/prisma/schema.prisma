@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── App auth (tenant = o próprio user) ──────────────────────────────
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String?
+  image       String?
+  createdAt   DateTime  @default(now())
+
+  accounts    Account[]
+  sessions    Session[]
+  connections ProviderConnection[]
+  activities  Activity[]
+}
+
+// Auth.js (NextAuth) Prisma adapter models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Domínio: conexões + atividades ──────────────────────────────────
+
+enum Provider {
+  GITHUB
+  GITLAB
+}
+
+enum AuthMethod {
+  OAUTH
+  PAT
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  SYNCING
+  ERROR
+  REVOKED
+}
+
+model ProviderConnection {
+  id              String           @id @default(cuid())
+  userId          String
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider        Provider
+  authMethod      AuthMethod
+  baseUrl         String           @default("") // "" = SaaS oficial; setado p/ self-hosted
+  externalUserId  String
+  externalLogin   String
+  avatarUrl       String?
+  // segredos cifrados (envelope encryption): "v1:iv:authTag:ciphertext"
+  accessTokenEnc  String
+  refreshTokenEnc String?
+  tokenExpiresAt  DateTime?
+  scopes          String[]
+  status          ConnectionStatus @default(ACTIVE)
+  statusDetail    String?
+  syncCursor      Json?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  activities Activity[]
+
+  @@unique([userId, provider, externalUserId, baseUrl])
+  @@index([userId])
+}
+
+enum ActivityType {
+  COMMIT
+  PUSH
+  PR
+  MR
+  ISSUE
+  REVIEW
+  COMMENT
+  RELEASE
+  OTHER
+}
+
+model Activity {
+  id           String             @id @default(cuid())
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connectionId String
+  connection   ProviderConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  provider     Provider
+  type         ActivityType
+  externalId   String
+  dedupeKey    String
+  title        String
+  url          String
+  repoName     String?
+  repoUrl      String?
+  occurredAt   DateTime
+  raw          Json
+  createdAt    DateTime           @default(now())
+
+  @@unique([connectionId, dedupeKey])
+  @@index([userId, occurredAt])
+  @@index([userId, provider, occurredAt])
+}
+
+model DailyContribution {
+  userId   String
+  date     DateTime // dia normalizado (00:00 UTC)
+  provider Provider
+  count    Int      @default(0)
+
+  @@id([userId, date, provider])
+  @@index([userId, date])
+}

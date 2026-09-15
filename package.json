@@ -1,0 +1,25 @@
+{
+  "name": "devpulse",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@11.5.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @devpulse/web dev",
+    "dev:worker": "pnpm --filter @devpulse/worker dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @devpulse/core db:generate",
+    "db:migrate": "pnpm --filter @devpulse/core db:migrate",
+    "db:studio": "pnpm --filter @devpulse/core db:studio",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
