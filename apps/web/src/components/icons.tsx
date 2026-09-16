@@ -1,3 +1,4 @@
+import type { FC } from "react";
 import type { ActivityType, Provider } from "@devpulse/core";
 
 type IconProps = { className?: string };
@@ -20,6 +21,20 @@ export function GitLabIcon({ className }: IconProps) {
   );
 }
 
+export function AzureIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M2.4 16.03l6.9-1.2 5.72 6.78a.4.4 0 0 0 .43.13l6.15-2.03V4.5L15.6.3a.4.4 0 0 0-.5.06l-9.9 11.02-2.8-2.15V16Zm12.98-9.2v9.96l-5.13-4.28 5.13-5.68Z" />
+    </svg>
+  );
+}
+
+const PROVIDER_ICONS: Record<Provider, FC<IconProps>> = {
+  GITHUB: GitHubIcon,
+  GITLAB: GitLabIcon,
+  AZURE: AzureIcon,
+};
+
 export function ProviderIcon({
   provider,
   className,
@@ -27,11 +42,8 @@ export function ProviderIcon({
   provider: Provider;
   className?: string;
 }) {
-  return provider === "GITHUB" ? (
-    <GitHubIcon className={className} />
-  ) : (
-    <GitLabIcon className={className} />
-  );
+  const Icon = PROVIDER_ICONS[provider];
+  return <Icon className={className} />;
 }
 
 /* ─── UI ─────────────────────────────────────────────────────────────── */

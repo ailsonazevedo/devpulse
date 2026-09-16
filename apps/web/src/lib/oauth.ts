@@ -29,6 +29,17 @@ export const OAUTH: Record<Provider, OAuthProviderConfig> = {
     tokenUrl: "https://gitlab.com/oauth/token",
     scope: "read_user read_api",
   },
+  // Azure DevOps: por enquanto é PAT-first — sem CLIENT_ID/SECRET o botão OAuth
+  // aparece desabilitado. As URLs ficam preenchidas para completar o OAuth
+  // (Entra ID) depois; o token exchange do Azure precisa de tratamento próprio.
+  AZURE: {
+    provider: "AZURE",
+    clientId: env.AZURE_CLIENT_ID,
+    clientSecret: env.AZURE_CLIENT_SECRET,
+    authorizeUrl: "https://app.vssps.visualstudio.com/oauth2/authorize",
+    tokenUrl: "https://app.vssps.visualstudio.com/oauth2/token",
+    scope: "vso.code vso.work",
+  },
 };
 
 export function isOAuthConfigured(provider: Provider): boolean {

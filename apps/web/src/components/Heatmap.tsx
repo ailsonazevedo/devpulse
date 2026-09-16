@@ -6,7 +6,7 @@ import type { HeatmapDay } from "@/lib/queries";
 import { providerMeta } from "@/components/labels";
 import { ProviderIcon } from "@/components/icons";
 
-const PROVIDERS: Provider[] = ["GITHUB", "GITLAB"];
+const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
 const MONTHS = [
   "jan", "fev", "mar", "abr", "mai", "jun",
   "jul", "ago", "set", "out", "nov", "dez",

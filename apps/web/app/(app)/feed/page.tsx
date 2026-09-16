@@ -9,7 +9,7 @@ import {
   TypeIcon,
 } from "@/components/icons";
 
-const PROVIDERS: Provider[] = ["GITHUB", "GITLAB"];
+const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
 const TYPES: ActivityType[] = ["PUSH", "PR", "MR", "ISSUE", "REVIEW", "COMMENT"];
 
 function dayKey(d: Date): string {

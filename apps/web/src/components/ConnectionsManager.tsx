@@ -21,7 +21,7 @@ export interface ConnectionView {
   lastSyncedAt: string | null;
 }
 
-const PROVIDERS: Provider[] = ["GITHUB", "GITLAB"];
+const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
 
 export function ConnectionsManager({
   connections,
@@ -258,13 +258,19 @@ function PatForm({
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
           type="url"
-          placeholder="Base URL self-hosted (opcional, ex.: https://gitlab.suaempresa.com)"
+          required={provider === "AZURE"}
+          placeholder={
+            provider === "AZURE"
+              ? "URL da organização (obrigatória, ex.: https://dev.azure.com/sua-org)"
+              : "Base URL self-hosted (opcional, ex.: https://gitlab.suaempresa.com)"
+          }
           className="input"
         />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-neutral-400">
             Escopos mínimos: GitHub <code>read:user, repo</code> · GitLab{" "}
-            <code>read_user, read_api</code>.
+            <code>read_user, read_api</code> · Azure DevOps{" "}
+            <code>Code (read), Work Items (read)</code>.
           </p>
           <button type="submit" disabled={loading} className="btn-primary shrink-0">
             {loading ? "Validando…" : "Conectar"}

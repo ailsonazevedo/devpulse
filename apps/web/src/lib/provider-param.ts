@@ -7,6 +7,8 @@ export function parseProvider(param: string): Provider | null {
       return "GITHUB";
     case "gitlab":
       return "GITLAB";
+    case "azure":
+      return "AZURE";
     default:
       return null;
   }

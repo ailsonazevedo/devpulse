@@ -64,6 +64,7 @@ model VerificationToken {
 enum Provider {
   GITHUB
   GITLAB
+  AZURE
 }
 
 enum AuthMethod {

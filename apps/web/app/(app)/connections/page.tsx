@@ -31,6 +31,7 @@ export default async function ConnectionsPage({
   const oauthConfigured: Record<Provider, boolean> = {
     GITHUB: isOAuthConfigured("GITHUB"),
     GITLAB: isOAuthConfigured("GITLAB"),
+    AZURE: isOAuthConfigured("AZURE"),
   };
 
   return (

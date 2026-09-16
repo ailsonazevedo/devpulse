@@ -6,6 +6,7 @@ export const providerMeta: Record<
 > = {
   GITHUB: { label: "GitHub", color: "#8957e5" },
   GITLAB: { label: "GitLab", color: "#fc6d26" },
+  AZURE: { label: "Azure DevOps", color: "#0078d4" },
 };
 
 /** Classe Tailwind de cor (texto) por tipo, para o badge de ícone no feed. */

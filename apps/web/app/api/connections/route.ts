@@ -3,16 +3,23 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { upsertConnection } from "@/lib/connections";
 
-const bodySchema = z.object({
-  provider: z.enum(["GITHUB", "GITLAB"]),
-  token: z.string().min(10),
-  baseUrl: z
-    .string()
-    .url()
-    .optional()
-    .or(z.literal(""))
-    .transform((v) => (v ? v : undefined)),
-});
+const bodySchema = z
+  .object({
+    provider: z.enum(["GITHUB", "GITLAB", "AZURE"]),
+    token: z.string().min(10),
+    baseUrl: z
+      .string()
+      .url()
+      .optional()
+      .or(z.literal(""))
+      .transform((v) => (v ? v : undefined)),
+  })
+  // Azure DevOps é scoped por organização: a base URL (ex.:
+  // https://dev.azure.com/sua-org) é obrigatória.
+  .refine((b) => b.provider !== "AZURE" || Boolean(b.baseUrl), {
+    message: "Azure DevOps exige a URL da organização (ex.: https://dev.azure.com/sua-org)",
+    path: ["baseUrl"],
+  });
 
 /** Conecta um provedor via Personal Access Token (inclui self-hosted via baseUrl). */
 export async function POST(req: NextRequest) {
