@@ -34,6 +34,7 @@ export async function syncConnection(
       ? decryptSecret(connection.refreshTokenEnc)
       : null,
     baseUrl: connection.baseUrl,
+    tokenType: connection.authMethod === "OAUTH" ? "oauth" : "pat",
   };
 
   await prisma.providerConnection.update({

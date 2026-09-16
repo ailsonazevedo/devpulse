@@ -32,7 +32,12 @@ function hostOf(creds: Credentials): string {
 }
 
 function makeClient(creds: Credentials) {
-  return new Gitlab({ host: hostOf(creds), token: creds.accessToken });
+  const host = hostOf(creds);
+  // OAuth precisa ir como Authorization: Bearer (oauthToken); PAT como
+  // PRIVATE-TOKEN (token). Enviar OAuth como PRIVATE-TOKEN resulta em 401.
+  return creds.tokenType === "oauth"
+    ? new Gitlab({ host, oauthToken: creds.accessToken })
+    : new Gitlab({ host, token: creds.accessToken });
 }
 
 function mapType(ev: GitlabEvent): ActivityType {

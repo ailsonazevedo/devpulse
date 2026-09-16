@@ -30,6 +30,7 @@ export async function upsertConnection(input: UpsertConnectionInput) {
     accessToken: input.accessToken,
     refreshToken: input.refreshToken ?? null,
     baseUrl,
+    tokenType: input.authMethod === "OAUTH" ? "oauth" : "pat",
   });
 
   const connection = await prisma.providerConnection.upsert({

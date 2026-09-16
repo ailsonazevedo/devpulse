@@ -6,6 +6,12 @@ export interface Credentials {
   refreshToken?: string | null;
   /** base URL da instância (self-hosted). Undefined = SaaS oficial. */
   baseUrl?: string | null;
+  /**
+   * Como o token deve ser enviado. Relevante para o GitLab (gitbeaker), onde
+   * PAT vai como header PRIVATE-TOKEN e OAuth como Authorization: Bearer.
+   * Default: "pat".
+   */
+  tokenType?: "oauth" | "pat";
 }
 
 /** Identidade do usuário no provedor, obtida ao conectar. */
