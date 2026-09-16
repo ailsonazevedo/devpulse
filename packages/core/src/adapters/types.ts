@@ -32,6 +32,17 @@ export interface RawActivity {
   raw: unknown;
 }
 
+/**
+ * Estado normalizado de um review, comparável entre provedores.
+ * GitHub: review.state; GitLab: ação approve/reviewed; Azure: vote (10/5/-5/-10).
+ */
+export type ReviewState =
+  | "approved"
+  | "changes_requested"
+  | "commented"
+  | "rejected"
+  | "pending";
+
 /** Atividade já normalizada para o modelo comum. */
 export interface NormalizedActivity {
   type: ActivityType;
@@ -43,6 +54,11 @@ export interface NormalizedActivity {
   repoName?: string | null;
   repoUrl?: string | null;
   occurredAt: Date;
+  /** Estado do review (só quando type === "REVIEW"). Carrega a semântica que o
+   *  provedor expõe de formas diferentes, hoje perdida no `raw`. */
+  reviewState?: ReviewState | null;
+  /** Nº de commits de um push (quando o provedor informa). Só em type PUSH. */
+  commitCount?: number | null;
   raw: unknown;
 }
 

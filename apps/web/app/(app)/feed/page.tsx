@@ -1,8 +1,15 @@
 import Link from "next/link";
 import type { ActivityType, Provider } from "@devpulse/core";
 import { auth } from "@/auth";
-import { getFeed, getStats } from "@/lib/queries";
-import { providerMeta, relativeTime, typeMeta } from "@/components/labels";
+import { getConnectedProviders, getFeed, getStats } from "@/lib/queries";
+import {
+  DISPLAY_TYPES,
+  groupMembers,
+  groupTypeLabel,
+  providerMeta,
+  relativeTime,
+  typeMeta,
+} from "@/components/labels";
 import {
   ExternalLinkIcon,
   ProviderIcon,
@@ -10,7 +17,8 @@ import {
 } from "@/components/icons";
 
 const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
-const TYPES: ActivityType[] = ["PUSH", "PR", "MR", "ISSUE", "REVIEW", "COMMENT"];
+const TYPES: ActivityType[] = DISPLAY_TYPES;
+const typeCardLabel = (t: ActivityType) => groupTypeLabel[t] ?? typeMeta[t].label;
 
 function dayKey(d: Date): string {
   return d.toLocaleDateString("pt-BR", {
@@ -36,10 +44,13 @@ export default async function FeedPage({
     ? (sp.type as ActivityType)
     : undefined;
 
-  const [items, stats] = await Promise.all([
-    getFeed(userId, { provider, type }),
+  const [items, stats, connected] = await Promise.all([
+    getFeed(userId, { provider, types: type ? groupMembers(type) : undefined }),
     getStats(userId),
+    getConnectedProviders(userId),
   ]);
+  // Só mostra cards/chips dos provedores realmente conectados (mantém ordem canônica).
+  const shownProviders = PROVIDERS.filter((p) => connected.includes(p));
 
   const groups = new Map<string, typeof items>();
   for (const it of items) {
@@ -70,7 +81,7 @@ export default async function FeedPage({
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">
         <StatCard label="Total" value={stats.total} />
-        {PROVIDERS.map((p) => (
+        {shownProviders.map((p) => (
           <StatCard
             key={p}
             label={providerMeta[p].label}
@@ -86,7 +97,7 @@ export default async function FeedPage({
           <Chip href={q({ provider: undefined })} active={!provider}>
             Todos
           </Chip>
-          {PROVIDERS.map((p) => (
+          {shownProviders.map((p) => (
             <Chip
               key={p}
               href={q({ provider: p })}
@@ -105,7 +116,7 @@ export default async function FeedPage({
           {TYPES.map((t) => (
             <Chip key={t} href={q({ type: t })} active={type === t}>
               <TypeIcon type={t} className="h-3.5 w-3.5" />
-              {typeMeta[t].label}
+              {typeCardLabel(t)}
             </Chip>
           ))}
         </div>

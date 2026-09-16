@@ -20,16 +20,35 @@ export const syncQueue = new Queue<SyncJobData>(SYNC_QUEUE, {
   },
 });
 
-/** Enfileira a sincronização de uma conexão. */
+/** Estados em que o job ainda vai/está rodando — mantém o dedup. */
+const IN_FLIGHT = new Set([
+  "waiting",
+  "waiting-children",
+  "active",
+  "delayed",
+  "prioritized",
+]);
+
+/**
+ * Enfileira a sincronização de uma conexão.
+ *
+ * Dedup: no máximo 1 job por conexão+modo **em andamento**. Como o jobId é fixo
+ * e jobs concluídos ficam retidos (removeOnComplete), um novo `add` com o mesmo
+ * jobId seria silenciosamente ignorado pelo BullMQ — o que travava resync e o
+ * incremental recorrente. Por isso, se já existir um job terminado (completed/
+ * failed) com esse id, removemos antes de re-enfileirar.
+ */
 export async function enqueueSync(
   connectionId: string,
   mode: SyncJobData["mode"],
 ): Promise<void> {
-  await syncQueue.add(
-    `sync:${mode}`,
-    { connectionId, mode },
-    // dedupe: no máximo 1 job por conexão+modo pendente.
-    // jobId não pode conter ":" (restrição do BullMQ) — usar "_".
-    { jobId: `${connectionId}_${mode}` },
-  );
+  // jobId não pode conter ":" (restrição do BullMQ) — usar "_".
+  const jobId = `${connectionId}_${mode}`;
+  const existing = await syncQueue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (IN_FLIGHT.has(state)) return; // já há um pendente/ativo: dedup
+    await existing.remove(); // terminado e retido: libera o jobId
+  }
+  await syncQueue.add(`sync:${mode}`, { connectionId, mode }, { jobId });
 }

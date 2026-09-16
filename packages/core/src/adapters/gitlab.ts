@@ -8,6 +8,7 @@ import {
   type Identity,
   type NormalizedActivity,
   type ProviderAdapter,
+  type ReviewState,
   type SyncCursor,
 } from "./types.js";
 
@@ -15,14 +16,21 @@ interface GitlabCursor {
   lastEventId?: number;
 }
 
-interface GitlabEvent {
+export interface GitlabEvent {
   id: number;
   action_name: string;
   target_type: string | null;
+  target_iid?: number | null;
   target_title: string | null;
   created_at: string;
   project_id: number | null;
   push_data?: { commit_count?: number; ref?: string } | null;
+}
+
+/** Dados do projeto usados para nome/URL no feed (resolvidos e cacheados). */
+interface GitlabProject {
+  name: string;
+  webUrl: string | null;
 }
 
 const DEFAULT_HOST = "https://gitlab.com";
@@ -40,11 +48,25 @@ function makeClient(creds: Credentials) {
     : new Gitlab({ host, token: creds.accessToken });
 }
 
-function mapType(ev: GitlabEvent): ActivityType {
+/** Aprovação/review de MR chega como evento de ação approve sobre MergeRequest. */
+export function isReviewEvent(ev: GitlabEvent): boolean {
+  return ev.target_type === "MergeRequest" && /approv/i.test(ev.action_name ?? "");
+}
+
+export function reviewStateOf(ev: GitlabEvent): ReviewState | null {
+  if (!isReviewEvent(ev)) return null;
+  // "approved" = aprovou; "unapproved" = removeu aprovação (volta a pendente).
+  return /unapprov/i.test(ev.action_name) ? "pending" : "approved";
+}
+
+export function mapType(ev: GitlabEvent): ActivityType {
   if (ev.action_name?.includes("pushed")) return "PUSH";
+  if (isReviewEvent(ev)) return "REVIEW";
   switch (ev.target_type) {
     case "MergeRequest":
-      return "MR";
+      // Unificado com PR (GitHub/Azure); o rótulo "Merge request" é derivado do
+      // provedor na camada de exibição (prLabel).
+      return "PR";
     case "Issue":
       return "ISSUE";
     case "Note":
@@ -60,8 +82,24 @@ function describe(ev: GitlabEvent, host: string): string {
   if (ev.push_data?.commit_count) {
     return `Push de ${ev.push_data.commit_count} commit(s) (${ev.push_data.ref ?? ""})`;
   }
+  if (isReviewEvent(ev)) {
+    const verb = /unapprov/i.test(ev.action_name) ? "Removeu aprovação de" : "Aprovou";
+    const target = ev.target_title ? `: ${ev.target_title}` : "";
+    return `${verb} MR${target}`;
+  }
   const target = ev.target_title ? `: ${ev.target_title}` : "";
   return `${ev.action_name} ${ev.target_type ?? ""}${target}`.trim() || `Atividade em ${host}`;
+}
+
+/** Deep-link para a entidade (MR/issue) quando há iid; senão a página do projeto. */
+function eventUrl(ev: GitlabEvent, project: GitlabProject | null): string | null {
+  const web = project?.webUrl ?? null;
+  if (!web) return null;
+  if (ev.target_iid) {
+    if (ev.target_type === "MergeRequest") return `${web}/-/merge_requests/${ev.target_iid}`;
+    if (ev.target_type === "Issue") return `${web}/-/issues/${ev.target_iid}`;
+  }
+  return web;
 }
 
 export const gitlabAdapter: ProviderAdapter = {
@@ -100,6 +138,29 @@ export const gitlabAdapter: ProviderAdapter = {
     let maxSeen = lastId ?? 0;
     let page = 1;
 
+    // Cache de projetos por sync: evita N chamadas repetidas ao mesmo project_id.
+    const projectCache = new Map<number, GitlabProject | null>();
+    const resolveProject = async (id: number | null): Promise<GitlabProject | null> => {
+      if (id === null) return null;
+      if (projectCache.has(id)) return projectCache.get(id) ?? null;
+      let proj: GitlabProject | null = null;
+      try {
+        const p = (await api.Projects.show(id)) as unknown as {
+          path_with_namespace?: string;
+          name_with_namespace?: string;
+          web_url?: string;
+        };
+        proj = {
+          name: p.path_with_namespace || p.name_with_namespace || `project#${id}`,
+          webUrl: p.web_url ?? null,
+        };
+      } catch {
+        proj = null; // sem acesso/erro: cai no fallback
+      }
+      projectCache.set(id, proj);
+      return proj;
+    };
+
     try {
       for (;;) {
         const res = (await api.Events.all({
@@ -124,15 +185,21 @@ export const gitlabAdapter: ProviderAdapter = {
           }
           if (ev.id > maxSeen) maxSeen = ev.id;
 
+          const project = await resolveProject(ev.project_id);
+          const type = mapType(ev);
           items.push({
-            type: mapType(ev),
+            type,
             externalId: String(ev.id),
             dedupeKey: `gl:${host}:${ev.id}`,
             title: describe(ev, host),
-            url: host,
-            repoName: ev.project_id ? `project#${ev.project_id}` : null,
-            repoUrl: null,
+            url: eventUrl(ev, project) ?? host,
+            repoName:
+              project?.name ?? (ev.project_id ? `project#${ev.project_id}` : null),
+            repoUrl: project?.webUrl ?? null,
             occurredAt: new Date(ev.created_at),
+            reviewState: reviewStateOf(ev),
+            commitCount:
+              type === "PUSH" ? (ev.push_data?.commit_count ?? null) : null,
             raw: ev,
           });
         }

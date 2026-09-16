@@ -2,7 +2,8 @@ import { type ActivityType, type Provider, prisma } from "@devpulse/core";
 
 export interface FeedFilter {
   provider?: Provider;
-  type?: ActivityType;
+  /** Tipos concretos a incluir (já expandidos do grupo exibido, ex.: PR→[PR,MR]). */
+  types?: ActivityType[];
 }
 
 /** Feed do usuário, ordenado por data desc. Sempre filtrado por userId. */
@@ -11,7 +12,9 @@ export async function getFeed(userId: string, filter: FeedFilter, limit = 100) {
     where: {
       userId,
       ...(filter.provider ? { provider: filter.provider } : {}),
-      ...(filter.type ? { type: filter.type } : {}),
+      ...(filter.types && filter.types.length
+        ? { type: { in: filter.types } }
+        : {}),
     },
     orderBy: { occurredAt: "desc" },
     take: limit,
@@ -80,6 +83,17 @@ export async function getStats(userId: string) {
       byProvider.map((p) => [p.provider, p._count._all]),
     ),
   };
+}
+
+/** Provedores que o usuário realmente conectou (distinct). Dirige os dashboards. */
+export async function getConnectedProviders(userId: string): Promise<Provider[]> {
+  const rows = await prisma.providerConnection.findMany({
+    where: { userId },
+    distinct: ["provider"],
+    select: { provider: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map((r) => r.provider);
 }
 
 export async function getConnections(userId: string) {

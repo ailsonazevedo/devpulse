@@ -7,6 +7,7 @@ import {
   prisma,
   syncConnection,
   syncQueue,
+  enqueueSync,
 } from "@devpulse/core";
 
 const CONCURRENCY = Number(process.env.SYNC_CONCURRENCY ?? 4);
@@ -24,15 +25,9 @@ async function handleTick(): Promise<void> {
     select: { id: true },
   });
   log("tick:fanout", { count: conns.length });
-  await Promise.all(
-    conns.map((c) =>
-      syncQueue.add(
-        "sync:incremental",
-        { connectionId: c.id, mode: "incremental" },
-        { jobId: `${c.id}_incremental` },
-      ),
-    ),
-  );
+  // enqueueSync libera o jobId de jobs já concluídos (senão o BullMQ deduparia
+  // contra o incremental retido e o recorrente nunca voltaria a rodar).
+  await Promise.all(conns.map((c) => enqueueSync(c.id, "incremental")));
 }
 
 const worker = new Worker<SyncJobData>(

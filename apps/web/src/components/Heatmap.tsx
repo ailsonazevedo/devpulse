@@ -6,7 +6,7 @@ import type { HeatmapDay } from "@/lib/queries";
 import { providerMeta } from "@/components/labels";
 import { ProviderIcon } from "@/components/icons";
 
-const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
+const ALL_PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
 const MONTHS = [
   "jan", "fev", "mar", "abr", "mai", "jun",
   "jul", "ago", "set", "out", "nov", "dez",
@@ -22,18 +22,27 @@ function level(count: number, max: number): number {
   return 0;
 }
 
-export function Heatmap({ days }: { days: HeatmapDay[] }) {
-  const [active, setActive] = useState<Set<Provider>>(new Set(PROVIDERS));
+export function Heatmap({
+  days,
+  providers,
+}: {
+  days: HeatmapDay[];
+  /** Provedores conectados a exibir; vazio/ausente cai em todos. */
+  providers?: Provider[];
+}) {
+  const shown =
+    providers && providers.length > 0 ? providers : ALL_PROVIDERS;
+  const [active, setActive] = useState<Set<Provider>>(new Set(shown));
 
   const byDate = useMemo(() => {
     const m = new Map<string, number>();
     for (const d of days) {
       let total = 0;
-      for (const p of PROVIDERS) if (active.has(p)) total += d.byProvider[p] ?? 0;
+      for (const p of shown) if (active.has(p)) total += d.byProvider[p] ?? 0;
       m.set(d.date, total);
     }
     return m;
-  }, [days, active]);
+  }, [days, active, shown]);
 
   const weeks = useMemo(() => {
     const today = new Date();
@@ -81,7 +90,7 @@ export function Heatmap({ days }: { days: HeatmapDay[] }) {
       const next = new Set(prev);
       if (next.has(p)) next.delete(p);
       else next.add(p);
-      return next.size === 0 ? new Set(PROVIDERS) : next;
+      return next.size === 0 ? new Set(shown) : next;
     });
 
   const cell = (count: number, key: string, dim = false) => {
@@ -116,7 +125,7 @@ export function Heatmap({ days }: { days: HeatmapDay[] }) {
           </span>
         </p>
         <div className="flex gap-1.5 text-xs">
-          {PROVIDERS.map((p) => {
+          {shown.map((p) => {
             const on = active.has(p);
             return (
               <button

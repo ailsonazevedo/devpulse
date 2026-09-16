@@ -1,24 +1,29 @@
-import type { ActivityType } from "@devpulse/core";
+import type { ActivityType, Provider } from "@devpulse/core";
 import { auth } from "@/auth";
-import { getHeatmap, getStats } from "@/lib/queries";
+import { getConnectedProviders, getHeatmap, getStats } from "@/lib/queries";
 import { Heatmap } from "@/components/Heatmap";
-import { typeMeta } from "@/components/labels";
+import { DISPLAY_TYPES, groupTypeLabel, typeGroup, typeMeta } from "@/components/labels";
 import { TypeIcon } from "@/components/icons";
 
-const TYPES: ActivityType[] = [
-  "PUSH",
-  "PR",
-  "MR",
-  "ISSUE",
-  "REVIEW",
-  "COMMENT",
-  "RELEASE",
-];
+const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
+const TYPES: ActivityType[] = DISPLAY_TYPES;
 
 export default async function HeatmapPage() {
   const session = await auth();
   const userId = session!.user.id;
-  const [days, stats] = await Promise.all([getHeatmap(userId), getStats(userId)]);
+  const [days, stats, connected] = await Promise.all([
+    getHeatmap(userId),
+    getStats(userId),
+    getConnectedProviders(userId),
+  ]);
+  const shownProviders = PROVIDERS.filter((p) => connected.includes(p));
+
+  // Funde tipos equivalentes entre provedores (PR+MR, PUSH+COMMIT) num só balde.
+  const byGroup: Partial<Record<ActivityType, number>> = {};
+  for (const [t, c] of Object.entries(stats.byType)) {
+    const g = typeGroup(t as ActivityType);
+    byGroup[g] = (byGroup[g] ?? 0) + (c as number);
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -30,22 +35,22 @@ export default async function HeatmapPage() {
       </div>
 
       <section className="card p-5">
-        <Heatmap days={days} />
+        <Heatmap days={days} providers={shownProviders} />
       </section>
 
       <section>
         <h2 className="mb-3 text-sm font-semibold text-neutral-500">Por tipo</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {TYPES.map((t) => (
             <div key={t} className="card px-3 py-3">
               <div className={"flex items-center gap-1.5 " + typeMeta[t].tint}>
                 <TypeIcon type={t} className="h-4 w-4" />
                 <span className="text-xs font-medium text-neutral-500">
-                  {typeMeta[t].label}
+                  {groupTypeLabel[t] ?? typeMeta[t].label}
                 </span>
               </div>
               <div className="mt-1 text-xl font-semibold tabular-nums">
-                {stats.byType[t] ?? 0}
+                {byGroup[t] ?? 0}
               </div>
             </div>
           ))}

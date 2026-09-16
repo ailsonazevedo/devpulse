@@ -26,6 +26,45 @@ export const typeLabel: Record<ActivityType, string> = Object.fromEntries(
   Object.entries(typeMeta).map(([k, v]) => [k, v.label]),
 ) as Record<ActivityType, string>;
 
+/** Rótulo de PR/MR conforme o provedor (GitLab usa "Merge request"). */
+export function prLabel(provider: Provider): string {
+  return provider === "GITLAB" ? "Merge request" : "Pull request";
+}
+
+/**
+ * Agrupa tipos equivalentes entre provedores para as métricas "Por tipo":
+ * PR|MR → PR (pull/merge request) e PUSH|COMMIT → PUSH (contribuição de código).
+ * Mantém a comparabilidade mesmo com adapters emitindo tipos distintos.
+ */
+export function typeGroup(type: ActivityType): ActivityType {
+  if (type === "MR") return "PR";
+  if (type === "COMMIT") return "PUSH";
+  return type;
+}
+
+/** Tipos exibidos nas métricas/filtros, já na forma agrupada e ordenada. */
+export const DISPLAY_TYPES: ActivityType[] = [
+  "PUSH",
+  "PR",
+  "ISSUE",
+  "REVIEW",
+  "COMMENT",
+  "RELEASE",
+];
+
+/** Tipos concretos que um tipo exibido representa (para filtrar o feed). */
+export function groupMembers(type: ActivityType): ActivityType[] {
+  if (type === "PR") return ["PR", "MR"];
+  if (type === "PUSH") return ["PUSH", "COMMIT"];
+  return [type];
+}
+
+/** Rótulo do card de tipo agrupado (grão misto de PUSH/COMMIT explicitado). */
+export const groupTypeLabel: Partial<Record<ActivityType, string>> = {
+  PUSH: "Commits/Pushes",
+  PR: "Pull/Merge request",
+};
+
 export function relativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();
   const min = Math.floor(diff / 60000);

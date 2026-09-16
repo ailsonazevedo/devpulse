@@ -6,6 +6,7 @@ import {
   type Identity,
   type NormalizedActivity,
   type ProviderAdapter,
+  type ReviewState,
   type SyncCursor,
 } from "./types.js";
 
@@ -23,7 +24,37 @@ const MAX_PER_TYPE = 500;
 interface AzureCursor {
   commitsSince?: string;
   prsSince?: string;
+  reviewsSince?: string;
   workItemsSince?: string;
+}
+
+/** Voto do revisor no Azure → estado normalizado. 0 = não votou (ignorado). */
+export function voteToReviewState(vote: number): ReviewState | null {
+  switch (vote) {
+    case 10:
+    case 5:
+      return "approved"; // 5 = aprovado com sugestões
+    case -5:
+      return "pending"; // aguardando o autor
+    case -10:
+      return "rejected";
+    default:
+      return null;
+  }
+}
+
+function reviewTitle(vote: number, prTitle: string): string {
+  const label =
+    vote === 10
+      ? "Aprovou"
+      : vote === 5
+        ? "Aprovou (com sugestões)"
+        : vote === -5
+          ? "Aguardando autor em"
+          : vote === -10
+            ? "Rejeitou"
+            : "Revisou";
+  return `${label} PR: ${prTitle}`;
 }
 
 /** baseUrl da organização (cloud) ou collection (server), sem barra final. */
@@ -174,9 +205,11 @@ export const azureAdapter: ProviderAdapter = {
 
     const commitsSince = sinceParam(state, "commitsSince");
     const prsSince = sinceParam(state, "prsSince");
+    const reviewsSince = sinceParam(state, "reviewsSince");
     const workItemsSince = sinceParam(state, "workItemsSince");
     let maxCommit = commitsSince;
     let maxPr = prsSince;
+    let maxReview = reviewsSince;
     let maxWi = workItemsSince;
 
     const projects = await apiGet<ListResponse<{ id: string; name: string }>>(
@@ -212,7 +245,7 @@ export const azureAdapter: ProviderAdapter = {
           const when = c.author?.date ?? new Date().toISOString();
           if (when > maxCommit) maxCommit = when;
           return {
-            type: "PUSH" as ActivityType,
+            type: "COMMIT" as ActivityType,
             externalId: c.commitId,
             dedupeKey: `az:${org}:commit:${c.commitId}`,
             title: c.comment?.split("\n")[0] || `Commit em ${repo.name}`,
@@ -263,6 +296,52 @@ export const azureAdapter: ProviderAdapter = {
         }
         if (prItems.length > 0) {
           yield { items: prItems, nextCursor: { ...state, prsSince: maxPr } };
+        }
+
+        // ─── Reviews: PRs em que o usuário é revisor e votou ──────────
+        const reviewUrl =
+          `${base}/${proj}/_apis/git/repositories/${repo.id}/pullrequests` +
+          `?searchCriteria.reviewerId=${encodeURIComponent(userId)}` +
+          `&searchCriteria.status=all&$top=${MAX_PER_TYPE}&api-version=${API_VERSION}`;
+        const reviewed = await apiGet<
+          ListResponse<{
+            pullRequestId: number;
+            title?: string;
+            creationDate?: string;
+            closedDate?: string;
+            reviewers?: { id: string; vote?: number }[];
+          }>
+        >(reviewUrl, creds);
+
+        const reviewItems: NormalizedActivity[] = [];
+        for (const pr of reviewed.value) {
+          const mine = pr.reviewers?.find((r) => r.id === userId);
+          const vote = mine?.vote ?? 0;
+          const reviewState = voteToReviewState(vote);
+          if (!reviewState) continue; // não votou (0) → não é review
+          // O endpoint não expõe a data do voto; usamos closedDate/creationDate
+          // como aproximação estável para ordenação/cursor.
+          const when = pr.closedDate ?? pr.creationDate ?? new Date().toISOString();
+          if (when <= reviewsSince) continue;
+          if (when > maxReview) maxReview = when;
+          reviewItems.push({
+            type: "REVIEW",
+            externalId: `${pr.pullRequestId}:${userId}`,
+            dedupeKey: `az:${org}:review:${repo.id}:${pr.pullRequestId}`,
+            title: reviewTitle(vote, pr.title || `!${pr.pullRequestId}`),
+            url: `${base}/${proj}/_git/${encodeURIComponent(repo.name)}/pullrequest/${pr.pullRequestId}`,
+            repoName: `${project.name}/${repo.name}`,
+            repoUrl: repo.webUrl ?? null,
+            occurredAt: new Date(when),
+            reviewState,
+            raw: pr,
+          });
+        }
+        if (reviewItems.length > 0) {
+          yield {
+            items: reviewItems,
+            nextCursor: { ...state, reviewsSince: maxReview },
+          };
         }
       }
 
@@ -332,6 +411,7 @@ export const azureAdapter: ProviderAdapter = {
       nextCursor: {
         commitsSince: maxCommit,
         prsSince: maxPr,
+        reviewsSince: maxReview,
         workItemsSince: maxWi,
       },
     };
