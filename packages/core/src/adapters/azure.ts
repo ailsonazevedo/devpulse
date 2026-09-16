@@ -10,6 +10,8 @@ import {
 } from "./types.js";
 
 const API_VERSION = "7.1";
+/** connectionData nunca saiu de preview: precisa do sufixo -preview.1. */
+const CONNECTION_DATA_API_VERSION = "7.1-preview.1";
 /** Perfil (e-mail do usuário) só existe no SaaS (vssps). */
 const VSSPS_PROFILE =
   "https://app.vssps.visualstudio.com/_apis/profile/profiles/me?api-version=7.1";
@@ -135,7 +137,7 @@ export const azureAdapter: ProviderAdapter = {
   async getIdentity(creds: Credentials): Promise<Identity> {
     const base = orgBase(creds);
     const data = await apiGet<ConnectionData>(
-      `${base}/_apis/connectionData?api-version=${API_VERSION}`,
+      `${base}/_apis/connectionData?api-version=${CONNECTION_DATA_API_VERSION}`,
       creds,
     );
     const u = data.authenticatedUser;
@@ -161,7 +163,7 @@ export const azureAdapter: ProviderAdapter = {
 
     // Identidade: id (criador de PRs / WIQL @me implícito) e e-mail (autor de commits).
     const conn = await apiGet<ConnectionData>(
-      `${base}/_apis/connectionData?api-version=${API_VERSION}`,
+      `${base}/_apis/connectionData?api-version=${CONNECTION_DATA_API_VERSION}`,
       creds,
     );
     const userId = conn.authenticatedUser.id;
