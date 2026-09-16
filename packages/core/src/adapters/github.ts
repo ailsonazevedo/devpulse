@@ -11,6 +11,7 @@ import {
   type ReviewState,
   type SyncCursor,
 } from "./types.js";
+import { oauthClient, refreshOAuthToken } from "./oauth.js";
 
 interface GithubCursor {
   /** maior event.id já ingerido (string numérica). */
@@ -229,6 +230,25 @@ export const githubAdapter: ProviderAdapter = {
     } catch (err) {
       throw asAuthError(err);
     }
+  },
+
+  async refreshToken(creds: Credentials) {
+    const client = oauthClient("GITHUB");
+    if (!client || !creds.refreshToken) {
+      throw new AuthError(
+        "GitHub: refresh indisponível (sem client OAuth ou refresh token)",
+      );
+    }
+    // github.com por padrão; GHE usa o origin do baseUrl da API.
+    const origin = creds.baseUrl
+      ? new URL(creds.baseUrl).origin
+      : "https://github.com";
+    return refreshOAuthToken({
+      tokenUrl: `${origin}/login/oauth/access_token`,
+      clientId: client.clientId,
+      clientSecret: client.clientSecret,
+      refreshToken: creds.refreshToken,
+    });
   },
 
   async fetchContributionCalendar(

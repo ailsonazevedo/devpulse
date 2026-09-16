@@ -11,6 +11,7 @@ import {
   type ReviewState,
   type SyncCursor,
 } from "./types.js";
+import { oauthClient, refreshOAuthToken } from "./oauth.js";
 
 interface GitlabCursor {
   lastEventId?: number;
@@ -216,6 +217,21 @@ export const gitlabAdapter: ProviderAdapter = {
     } catch (err) {
       throw asAuthError(err);
     }
+  },
+
+  async refreshToken(creds: Credentials) {
+    const client = oauthClient("GITLAB");
+    if (!client || !creds.refreshToken) {
+      throw new AuthError(
+        "GitLab: refresh indisponível (sem client OAuth ou refresh token)",
+      );
+    }
+    return refreshOAuthToken({
+      tokenUrl: `${hostOf(creds)}/oauth/token`,
+      clientId: client.clientId,
+      clientSecret: client.clientSecret,
+      refreshToken: creds.refreshToken,
+    });
   },
 
   async fetchContributionCalendar(creds: Credentials): Promise<DailyCount[]> {
