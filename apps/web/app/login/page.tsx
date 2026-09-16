@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth, signIn } from "@/auth";
 import { isDev } from "@/env";
+import { GitHubIcon, GitLabIcon, LogoMark } from "@/components/icons";
 
 export default async function LoginPage() {
   const session = await auth();
@@ -13,41 +14,53 @@ export default async function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 p-6">
-      <div>
-        <h1 className="text-2xl font-bold">DevPulse</h1>
-        <p className="text-sm text-neutral-500">
-          Feed unificado das suas contribuições em GitHub, GitLab e mais.
-        </p>
-      </div>
+    <main className="flex min-h-screen items-center justify-center p-6">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-neutral-900 text-white dark:bg-white dark:text-neutral-900">
+            <LogoMark className="h-7 w-7" />
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">DevPulse</h1>
+            <p className="mt-1 text-sm text-neutral-500">
+              Todas as suas contribuições, num só feed.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-neutral-400">
+            <GitHubIcon className="h-5 w-5" />
+            <GitLabIcon className="h-5 w-5" />
+            <span className="text-xs">e mais</span>
+          </div>
+        </div>
 
-      {isDev ? (
-        <form action={login} className="flex flex-col gap-3">
-          <label className="text-sm font-medium">Entrar (dev) por email</label>
-          <input
-            name="email"
-            type="email"
-            required
-            placeholder="voce@exemplo.com"
-            className="rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            className="rounded-md bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-700"
-          >
-            Entrar
-          </button>
-          <p className="text-xs text-neutral-400">
-            Login por email é apenas para desenvolvimento. Em produção, troque por
-            magic-link ou OAuth de login.
-          </p>
-        </form>
-      ) : (
-        <p className="text-sm text-red-500">
-          Login de produção não configurado. Configure um provedor de login em
-          <code> src/auth.ts</code>.
-        </p>
-      )}
+        {isDev ? (
+          <form action={login} className="card flex flex-col gap-3 p-5">
+            <label htmlFor="email" className="text-sm font-medium">
+              Entrar por email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              placeholder="voce@exemplo.com"
+              className="input"
+            />
+            <button type="submit" className="btn-primary w-full">
+              Entrar
+            </button>
+            <p className="text-xs text-neutral-400">
+              Login por email é apenas para desenvolvimento. Em produção, troque
+              por magic-link ou OAuth de login.
+            </p>
+          </form>
+        ) : (
+          <div className="card p-5 text-sm text-red-500">
+            Login de produção não configurado. Configure um provedor de login em{" "}
+            <code>src/auth.ts</code>.
+          </div>
+        )}
+      </div>
     </main>
   );
 }

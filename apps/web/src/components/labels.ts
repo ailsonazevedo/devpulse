@@ -2,23 +2,28 @@ import type { ActivityType, Provider } from "@devpulse/core";
 
 export const providerMeta: Record<
   Provider,
-  { label: string; color: string; icon: string }
+  { label: string; color: string }
 > = {
-  GITHUB: { label: "GitHub", color: "#6e5494", icon: "" },
-  GITLAB: { label: "GitLab", color: "#fc6d26", icon: "" },
+  GITHUB: { label: "GitHub", color: "#8957e5" },
+  GITLAB: { label: "GitLab", color: "#fc6d26" },
 };
 
-export const typeLabel: Record<ActivityType, string> = {
-  COMMIT: "Commit",
-  PUSH: "Push",
-  PR: "Pull request",
-  MR: "Merge request",
-  ISSUE: "Issue",
-  REVIEW: "Review",
-  COMMENT: "Comentário",
-  RELEASE: "Release",
-  OTHER: "Atividade",
+/** Classe Tailwind de cor (texto) por tipo, para o badge de ícone no feed. */
+export const typeMeta: Record<ActivityType, { label: string; tint: string }> = {
+  COMMIT: { label: "Commit", tint: "text-emerald-600 dark:text-emerald-400" },
+  PUSH: { label: "Push", tint: "text-emerald-600 dark:text-emerald-400" },
+  PR: { label: "Pull request", tint: "text-violet-600 dark:text-violet-400" },
+  MR: { label: "Merge request", tint: "text-orange-600 dark:text-orange-400" },
+  ISSUE: { label: "Issue", tint: "text-sky-600 dark:text-sky-400" },
+  REVIEW: { label: "Review", tint: "text-teal-600 dark:text-teal-400" },
+  COMMENT: { label: "Comentário", tint: "text-amber-600 dark:text-amber-400" },
+  RELEASE: { label: "Release", tint: "text-pink-600 dark:text-pink-400" },
+  OTHER: { label: "Atividade", tint: "text-neutral-500 dark:text-neutral-400" },
 };
+
+export const typeLabel: Record<ActivityType, string> = Object.fromEntries(
+  Object.entries(typeMeta).map(([k, v]) => [k, v.label]),
+) as Record<ActivityType, string>;
 
 export function relativeTime(date: Date): string {
   const diff = Date.now() - date.getTime();

@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Provider } from "@devpulse/core";
 import { providerMeta } from "@/components/labels";
+import {
+  ProviderIcon,
+  RefreshIcon,
+  UnlinkIcon,
+} from "@/components/icons";
 
 export interface ConnectionView {
   id: string;
@@ -30,7 +35,8 @@ export function ConnectionsManager({
   const [error, setError] = useState<string | null>(null);
 
   async function disconnect(id: string) {
-    if (!confirm("Desconectar? As atividades dessa conexão serão removidas.")) return;
+    if (!confirm("Desconectar? As atividades dessa conexão serão removidas."))
+      return;
     setBusy(id);
     await fetch(`/api/connections/${id}`, { method: "DELETE" });
     setBusy(null);
@@ -51,45 +57,63 @@ export function ConnectionsManager({
           Suas conexões
         </h2>
         {connections.length === 0 ? (
-          <p className="text-sm text-neutral-400">Nenhuma conexão ainda.</p>
+          <div className="card border-dashed p-6 text-center text-sm text-neutral-400">
+            Nenhuma conexão ainda. Conecte um provedor abaixo.
+          </div>
         ) : (
           <ul className="flex flex-col gap-2">
             {connections.map((c) => (
               <li
                 key={c.id}
-                className="flex flex-wrap items-center gap-3 rounded-md border border-neutral-200 px-4 py-3 dark:border-neutral-800"
+                className="card flex flex-wrap items-center gap-3 px-4 py-3"
               >
                 <span
-                  className="h-3 w-3 rounded-full"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-white"
                   style={{ background: providerMeta[c.provider].color }}
-                />
-                <div className="mr-auto">
-                  <div className="text-sm font-medium">
-                    {providerMeta[c.provider].label} · {c.externalLogin}
-                    <span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:bg-neutral-800">
+                >
+                  <ProviderIcon provider={c.provider} className="h-5 w-5" />
+                </span>
+                <div className="mr-auto min-w-0">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <span className="truncate">
+                      {providerMeta[c.provider].label} · {c.externalLogin}
+                    </span>
+                    <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:bg-neutral-800">
                       {c.authMethod}
                     </span>
                   </div>
-                  <div className="text-xs text-neutral-400">
-                    {c.baseUrl ? c.baseUrl + " · " : ""}
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-neutral-400">
+                    {c.baseUrl && (
+                      <>
+                        <span className="truncate">{c.baseUrl}</span>
+                        <span>·</span>
+                      </>
+                    )}
                     <StatusBadge status={c.status} detail={c.statusDetail} />
-                    {c.lastSyncedAt
-                      ? ` · sync ${new Date(c.lastSyncedAt).toLocaleString("pt-BR")}`
-                      : " · nunca sincronizado"}
+                    <span>·</span>
+                    <span>
+                      {c.lastSyncedAt
+                        ? `sync ${new Date(c.lastSyncedAt).toLocaleString("pt-BR")}`
+                        : "nunca sincronizado"}
+                    </span>
                   </div>
                 </div>
                 <button
                   onClick={() => resync(c.id)}
                   disabled={busy === c.id}
-                  className="rounded-md border border-neutral-300 px-2.5 py-1 text-xs hover:border-neutral-500 disabled:opacity-50 dark:border-neutral-700"
+                  className="btn-ghost px-2.5 py-1.5 text-xs"
                 >
+                  <RefreshIcon
+                    className={"h-3.5 w-3.5 " + (busy === c.id ? "animate-spin" : "")}
+                  />
                   Ressincronizar
                 </button>
                 <button
                   onClick={() => disconnect(c.id)}
                   disabled={busy === c.id}
-                  className="rounded-md border border-red-300 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:hover:bg-red-950"
+                  className="btn px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
                 >
+                  <UnlinkIcon className="h-3.5 w-3.5" />
                   Desconectar
                 </button>
               </li>
@@ -107,13 +131,11 @@ export function ConnectionsManager({
             <a
               key={p}
               href={
-                oauthConfigured[p]
-                  ? `/api/oauth/${p.toLowerCase()}/start`
-                  : undefined
+                oauthConfigured[p] ? `/api/oauth/${p.toLowerCase()}/start` : undefined
               }
               aria-disabled={!oauthConfigured[p]}
               className={
-                "rounded-md px-4 py-2 text-sm font-medium text-white " +
+                "btn px-4 py-2 text-white shadow-sm " +
                 (oauthConfigured[p]
                   ? "hover:opacity-90"
                   : "cursor-not-allowed opacity-40")
@@ -122,20 +144,22 @@ export function ConnectionsManager({
               title={
                 oauthConfigured[p]
                   ? ""
-                  : "OAuth não configurado (defina CLIENT_ID/SECRET)"
+                  : "OAuth não configurado (defina CLIENT_ID/SECRET no .env)"
               }
             >
+              <ProviderIcon provider={p} className="h-4 w-4" />
               Conectar {providerMeta[p].label}
             </a>
           ))}
         </div>
       </section>
 
-      <PatForm
-        onError={setError}
-        onDone={() => router.refresh()}
-      />
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      <PatForm onError={setError} onDone={() => router.refresh()} />
+      {error && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -147,14 +171,17 @@ function StatusBadge({
   status: string;
   detail: string | null;
 }) {
-  const color =
-    status === "ACTIVE"
-      ? "text-green-600"
-      : status === "SYNCING"
-        ? "text-blue-500"
-        : "text-red-500";
+  const map: Record<string, string> = {
+    ACTIVE: "bg-green-500",
+    SYNCING: "bg-blue-500",
+    ERROR: "bg-red-500",
+    REVOKED: "bg-red-500",
+  };
   return (
-    <span className={color} title={detail ?? ""}>
+    <span className="inline-flex items-center gap-1" title={detail ?? ""}>
+      <span
+        className={"h-1.5 w-1.5 rounded-full " + (map[status] ?? "bg-neutral-400")}
+      />
       {status.toLowerCase()}
     </span>
   );
@@ -194,50 +221,55 @@ function PatForm({
 
   return (
     <section>
-      <h2 className="mb-3 text-sm font-semibold text-neutral-500">
-        Conectar via Personal Access Token (inclui self-hosted)
+      <h2 className="mb-1 text-sm font-semibold text-neutral-500">
+        Conectar via Personal Access Token
       </h2>
-      <form onSubmit={submit} className="flex flex-col gap-3 sm:max-w-lg">
+      <p className="mb-3 text-xs text-neutral-400">
+        Funciona também para instâncias self-hosted (informe a base URL).
+      </p>
+      <form onSubmit={submit} className="card flex flex-col gap-3 p-4 sm:max-w-xl">
         <div className="flex gap-2">
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value as Provider)}
-            className="rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
-          >
-            {PROVIDERS.map((p) => (
-              <option key={p} value={p}>
-                {providerMeta[p].label}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500">
+              <ProviderIcon provider={provider} className="h-4 w-4" />
+            </span>
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as Provider)}
+              className="input appearance-none pl-8 pr-8"
+            >
+              {PROVIDERS.map((p) => (
+                <option key={p} value={p}>
+                  {providerMeta[p].label}
+                </option>
+              ))}
+            </select>
+          </div>
           <input
             value={token}
             onChange={(e) => setToken(e.target.value)}
             type="password"
             required
             placeholder="Personal Access Token"
-            className="flex-1 rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+            className="input flex-1"
           />
         </div>
         <input
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
           type="url"
-          placeholder="Base URL self-hosted (opcional, ex.: https://gitlab.minhaempresa.com)"
-          className="rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm dark:border-neutral-700"
+          placeholder="Base URL self-hosted (opcional, ex.: https://gitlab.suaempresa.com)"
+          className="input"
         />
-        <button
-          type="submit"
-          disabled={loading}
-          className="self-start rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {loading ? "Validando…" : "Conectar"}
-        </button>
-        <p className="text-xs text-neutral-400">
-          Escopos mínimos: GitHub <code>read:user, repo</code> · GitLab{" "}
-          <code>read_user, read_api</code>. O token é cifrado em repouso e nunca
-          é exibido novamente.
-        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-neutral-400">
+            Escopos mínimos: GitHub <code>read:user, repo</code> · GitLab{" "}
+            <code>read_user, read_api</code>.
+          </p>
+          <button type="submit" disabled={loading} className="btn-primary shrink-0">
+            {loading ? "Validando…" : "Conectar"}
+          </button>
+        </div>
       </form>
     </section>
   );
