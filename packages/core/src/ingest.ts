@@ -17,6 +17,11 @@ export interface SyncResult {
 /** Margem para refresh proativo: renova se faltar ≤ 60s para expirar. */
 const EXPIRY_SKEW_MS = 60_000;
 
+const BACKFILL_YEARS = Math.max(
+  1,
+  Number(process.env.HEATMAP_BACKFILL_YEARS ?? 10),
+);
+
 /** Monta as credenciais (descriptografadas) a partir da conexão. */
 function buildCreds(connection: ProviderConnection): Credentials {
   return {
@@ -42,7 +47,9 @@ function canRefresh(
 }
 
 function isExpiring(expiresAt: Date | null): boolean {
-  return expiresAt !== null && expiresAt.getTime() <= Date.now() + EXPIRY_SKEW_MS;
+  return (
+    expiresAt !== null && expiresAt.getTime() <= Date.now() + EXPIRY_SKEW_MS
+  );
 }
 
 /**
@@ -94,6 +101,7 @@ async function ingestOnce(
   adapter: ProviderAdapter,
   creds: Credentials,
   cursor: Record<string, unknown> | undefined,
+  mode: "backfill" | "incremental",
 ): Promise<SyncResult> {
   let inserted = 0;
   let pages = 0;
@@ -129,20 +137,7 @@ async function ingestOnce(
     if (page.nextCursor) latestCursor = page.nextCursor;
   }
 
-  // Heatmap: se o provedor expõe um calendário autoritativo COM dados
-  // (ex.: GitHub GraphQL; GitLab.com público), usa-o (ano cheio, inclui
-  // privadas). Se o calendário vier vazio — comum em GitLab self-hosted, onde
-  // o calendar.json web não expõe contribuições privadas — cai no rollup
-  // derivado das atividades já ingeridas (que via PAT incluem projetos
-  // privados). Provedores sem calendário usam sempre o rollup por atividade.
-  const calendar = adapter.fetchContributionCalendar
-    ? await adapter.fetchContributionCalendar(creds)
-    : null;
-  if (calendar && calendar.some((d) => d.count > 0)) {
-    await writeCalendarRollups(connection.userId, connection.provider, calendar);
-  } else if (earliest) {
-    await recomputeRollups(connection.userId, connection.provider, earliest);
-  }
+  await writeHeatmap(connection, adapter, creds, earliest, mode);
 
   await prisma.providerConnection.update({
     where: { id: connection.id },
@@ -191,7 +186,10 @@ export async function syncConnection(
   let didRefresh = false;
 
   // Refresh proativo: token OAuth prestes a expirar.
-  if (canRefresh(connection, adapter) && isExpiring(connection.tokenExpiresAt)) {
+  if (
+    canRefresh(connection, adapter) &&
+    isExpiring(connection.tokenExpiresAt)
+  ) {
     try {
       creds = await refreshConnection(connection, adapter);
       didRefresh = true;
@@ -202,10 +200,14 @@ export async function syncConnection(
   }
 
   try {
-    return await ingestOnce(connection, adapter, creds, cursor);
+    return await ingestOnce(connection, adapter, creds, cursor, mode);
   } catch (err) {
     // Refresh reativo: access token expirou durante o sync — renova e repete 1x.
-    if (err instanceof AuthError && !didRefresh && canRefresh(connection, adapter)) {
+    if (
+      err instanceof AuthError &&
+      !didRefresh &&
+      canRefresh(connection, adapter)
+    ) {
       try {
         creds = await refreshConnection(connection, adapter);
       } catch (refreshErr) {
@@ -213,7 +215,7 @@ export async function syncConnection(
         throw refreshErr;
       }
       try {
-        return await ingestOnce(connection, adapter, creds, cursor);
+        return await ingestOnce(connection, adapter, creds, cursor, mode);
       } catch (retryErr) {
         await persistErrorStatus(connectionId, retryErr);
         throw retryErr;
@@ -221,6 +223,70 @@ export async function syncConnection(
     }
     await persistErrorStatus(connectionId, err);
     throw err;
+  }
+}
+
+/**
+ * Escreve os rollups do heatmap. Se o provedor expõe um calendário autoritativo
+ * COM dados (ex.: GitHub GraphQL; GitLab.com público), usa-o — ano cheio, inclui
+ * privadas. No backfill de provedores com calendário histórico (GitHub), busca
+ * ano a ano (`BACKFILL_YEARS`), pois a API limita cada consulta a 1 ano.
+ *
+ * Se o calendário vier vazio — comum em GitLab self-hosted, onde o calendar.json
+ * web não expõe contribuições privadas — cai no rollup derivado das atividades
+ * já ingeridas (que via PAT incluem projetos privados). Provedores sem calendário
+ * usam sempre o rollup por atividade (limitado à janela de backfill do adapter).
+ */
+async function writeHeatmap(
+  connection: ProviderConnection,
+  adapter: ProviderAdapter,
+  creds: Credentials,
+  earliest: Date | null,
+  mode: "backfill" | "incremental",
+): Promise<void> {
+  if (adapter.fetchContributionCalendar) {
+    if (mode === "backfill" && adapter.supportsHistoricalCalendar) {
+      // Vai do ano atual para trás buscando o máximo de histórico com dados.
+      // Para após anos vazios consecutivos (fim do histórico), com teto em
+      // BACKFILL_YEARS para não estourar chamadas em contas muito antigas.
+      const now = new Date();
+      const cy = now.getUTCFullYear();
+      let wrote = false;
+      let emptyStreak = 0;
+      for (let y = cy; y > cy - BACKFILL_YEARS; y--) {
+        const range = {
+          from: new Date(Date.UTC(y, 0, 1, 0, 0, 0, 0)),
+          to:
+            y === cy ? now : new Date(Date.UTC(y, 11, 31, 23, 59, 59, 999)),
+        };
+        const calendar = await adapter.fetchContributionCalendar(creds, range);
+        if (calendar.some((d) => d.count > 0)) {
+          await writeCalendarRollups(
+            connection.userId,
+            connection.provider,
+            calendar,
+          );
+          wrote = true;
+          emptyStreak = 0;
+        } else if (++emptyStreak >= 2) {
+          break; // dois anos seguidos sem dados: acabou o histórico
+        }
+      }
+      if (wrote) return;
+    } else {
+      const calendar = await adapter.fetchContributionCalendar(creds);
+      if (calendar.some((d) => d.count > 0)) {
+        await writeCalendarRollups(
+          connection.userId,
+          connection.provider,
+          calendar,
+        );
+        return;
+      }
+    }
+  }
+  if (earliest) {
+    await recomputeRollups(connection.userId, connection.provider, earliest);
   }
 }
 

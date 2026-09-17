@@ -136,6 +136,7 @@ function describe(event: {
 
 export const githubAdapter: ProviderAdapter = {
   provider: "GITHUB",
+  supportsHistoricalCalendar: true,
 
   async getIdentity(creds: Credentials): Promise<Identity> {
     const octokit = makeClient(creds);

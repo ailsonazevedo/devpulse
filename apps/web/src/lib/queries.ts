@@ -36,17 +36,32 @@ export interface HeatmapDay {
   byProvider: Partial<Record<Provider, number>>;
 }
 
-/** Dados do heatmap dos últimos `days` dias, somando provedores. */
+/**
+ * Dados do heatmap somando provedores. Sem `year`, cobre os últimos 365 dias
+ * (janela móvel). Com `year`, cobre o ano-calendário inteiro (UTC).
+ */
 export async function getHeatmap(
   userId: string,
-  days = 365,
+  opts: { year?: number } = {},
 ): Promise<HeatmapDay[]> {
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - days);
-  since.setUTCHours(0, 0, 0, 0);
+  let where: { userId: string; date: { gte: Date; lte?: Date } };
+  if (opts.year) {
+    where = {
+      userId,
+      date: {
+        gte: new Date(Date.UTC(opts.year, 0, 1, 0, 0, 0, 0)),
+        lte: new Date(Date.UTC(opts.year, 11, 31, 23, 59, 59, 999)),
+      },
+    };
+  } else {
+    const since = new Date();
+    since.setUTCDate(since.getUTCDate() - 365);
+    since.setUTCHours(0, 0, 0, 0);
+    where = { userId, date: { gte: since } };
+  }
 
   const rows = await prisma.dailyContribution.findMany({
-    where: { userId, date: { gte: since } },
+    where,
     select: { date: true, provider: true, count: true },
   });
 
@@ -59,6 +74,17 @@ export async function getHeatmap(
     map.set(key, day);
   }
   return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Anos (desc) com contribuições registradas, para o seletor do heatmap. */
+export async function getContributionYears(userId: string): Promise<number[]> {
+  const rows = await prisma.$queryRaw<{ year: number }[]>`
+    SELECT DISTINCT EXTRACT(YEAR FROM "date")::int AS year
+    FROM "DailyContribution"
+    WHERE "userId" = ${userId}
+    ORDER BY year DESC
+  `;
+  return rows.map((r) => r.year);
 }
 
 /** Totais por tipo e por provedor. */

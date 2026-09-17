@@ -1,6 +1,11 @@
 import type { ActivityType, Provider } from "@devpulse/core";
 import { auth } from "@/auth";
-import { getConnectedProviders, getHeatmap, getStats } from "@/lib/queries";
+import {
+  getConnectedProviders,
+  getContributionYears,
+  getHeatmap,
+  getStats,
+} from "@/lib/queries";
 import { Heatmap } from "@/components/Heatmap";
 import { DISPLAY_TYPES, groupTypeLabel, typeGroup, typeMeta } from "@/components/labels";
 import { TypeIcon } from "@/components/icons";
@@ -8,11 +13,21 @@ import { TypeIcon } from "@/components/icons";
 const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
 const TYPES: ActivityType[] = DISPLAY_TYPES;
 
-export default async function HeatmapPage() {
+export default async function HeatmapPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ year?: string }>;
+}) {
   const session = await auth();
   const userId = session!.user.id;
+  const sp = await searchParams;
+
+  const years = await getContributionYears(userId);
+  const parsedYear = Number(sp.year);
+  const year = years.includes(parsedYear) ? parsedYear : undefined;
+
   const [days, stats, connected] = await Promise.all([
-    getHeatmap(userId),
+    getHeatmap(userId, { year }),
     getStats(userId),
     getConnectedProviders(userId),
   ]);
@@ -35,7 +50,12 @@ export default async function HeatmapPage() {
       </div>
 
       <section className="card p-5">
-        <Heatmap days={days} providers={shownProviders} />
+        <Heatmap
+          days={days}
+          providers={shownProviders}
+          year={year}
+          years={years}
+        />
       </section>
 
       <section>

@@ -78,6 +78,14 @@ export interface DailyCount {
 export interface ProviderAdapter {
   readonly provider: Provider;
 
+  /**
+   * O calendário (`fetchContributionCalendar`) honra o `range` e pode ser
+   * consultado ano a ano, permitindo backfill histórico multi-ano (ex.: GitHub,
+   * cuja API limita cada consulta a 1 ano). Ausente/false = calendário cobre
+   * apenas ~1 ano fixo e ignora o range.
+   */
+  readonly supportsHistoricalCalendar?: boolean;
+
   /** Valida credenciais e retorna a identidade (usado no "connect"). */
   getIdentity(creds: Credentials): Promise<Identity>;
 
