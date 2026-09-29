@@ -12,6 +12,7 @@ import {
   type SyncCursor,
 } from "./types.js";
 import { oauthClient, refreshOAuthToken } from "./oauth.js";
+import type { AiEvidence } from "../ai-detect.js";
 
 interface GithubCursor {
   /** maior event.id já ingerido (string numérica). */
@@ -134,9 +135,98 @@ function describe(event: {
   }
 }
 
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj =>
+  v && typeof v === "object" ? (v as Obj) : {};
+const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+/**
+ * Evidências de IA de um evento do GitHub: mensagens/autores dos commits do
+ * push (quando a Events API ainda os inclui) e título/corpo/autor/branch do PR.
+ */
+export function githubAiEvidence(raw: unknown): AiEvidence {
+  const r = obj(raw);
+  const payload = obj(r.payload);
+  // A Events API atual omite `commits` e o corpo do PR; eles vêm do
+  // enriquecimento (`_devpulse`, ver enrichForAi). Lê ambos por compatibilidade.
+  const extra = obj(r._devpulse);
+  const commits = [
+    ...(Array.isArray(payload.commits) ? payload.commits : []),
+    ...(Array.isArray(extra.commits) ? extra.commits : []),
+  ].map(obj);
+  const pr = obj(payload.pull_request);
+  return {
+    texts: [
+      ...commits.map((c) => str(c.message)),
+      str(pr.title),
+      str(pr.body),
+      str(extra.prTitle),
+      str(extra.prBody),
+    ],
+    authors: [
+      ...commits.flatMap((c) => [str(obj(c.author).name), str(obj(c.author).email)]),
+      str(obj(pr.user).login),
+      str(extra.prUser),
+    ],
+    branches: [str(payload.ref), str(obj(pr.head).ref)],
+  };
+}
+
+/** Teto de chamadas extras (compare/pulls) por sync, para poupar rate-limit. */
+const AI_ENRICH_MAX_CALLS = 200;
+/** Máx. de mensagens de commit guardadas por push. */
+const AI_ENRICH_MAX_COMMITS = 50;
+
+/**
+ * Busca o que a Events API deixou de enviar e é evidência de IA: mensagens dos
+ * commits de um push (compare before...head) e título/corpo/autor de PR aberto.
+ * Grava em `raw._devpulse`. Best-effort: falhas não quebram o sync.
+ */
+async function enrichForAi(
+  octokit: Octokit,
+  event: { type: string | null; repo: { name: string } },
+  payload: Obj,
+): Promise<Obj | null> {
+  const [owner, repo] = event.repo.name.split("/");
+  if (!owner || !repo) return null;
+  try {
+    if (event.type === "PushEvent") {
+      const before = str(payload.before);
+      const head = str(payload.head);
+      if (!head) return null;
+      // push de branch nova: before = 000…0 → só o commit do head.
+      if (!before || /^0+$/.test(before)) {
+        const { data } = await octokit.rest.repos.getCommit({ owner, repo, ref: head });
+        return { commits: [{ message: data.commit.message, author: data.commit.author }] };
+      }
+      const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+        owner,
+        repo,
+        basehead: `${before}...${head}`,
+        per_page: AI_ENRICH_MAX_COMMITS,
+      });
+      return {
+        commits: data.commits
+          .slice(-AI_ENRICH_MAX_COMMITS)
+          .map((c) => ({ message: c.commit.message, author: c.commit.author })),
+      };
+    }
+    if (event.type === "PullRequestEvent" && payload.action === "opened") {
+      const number = Number(payload.number ?? obj(payload.pull_request).number);
+      if (!number) return null;
+      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: number });
+      return { prTitle: data.title, prBody: data.body, prUser: data.user?.login ?? null };
+    }
+  } catch {
+    // repo apagado/sem acesso, SHA sumiu (force-push), rate-limit: segue sem.
+  }
+  return null;
+}
+
 export const githubAdapter: ProviderAdapter = {
   provider: "GITHUB",
   supportsHistoricalCalendar: true,
+  aiEvidence: githubAiEvidence,
 
   async getIdentity(creds: Credentials): Promise<Identity> {
     const octokit = makeClient(creds);
@@ -164,6 +254,7 @@ export const githubAdapter: ProviderAdapter = {
     let maxSeen = lastId;
 
     const web = webBase(creds);
+    let enrichCalls = 0;
     try {
       // precisamos do login p/ o endpoint de eventos
       const { data: me } = await octokit.rest.users.getAuthenticated();
@@ -188,6 +279,16 @@ export const githubAdapter: ProviderAdapter = {
           const repoWeb = `${web}/${repoName}`;
           const type = mapType(event.type);
           const payload = event.payload as Record<string, unknown>;
+          let raw: unknown = event;
+          if (
+            (event.type === "PushEvent" ||
+              (event.type === "PullRequestEvent" && payload.action === "opened")) &&
+            enrichCalls < AI_ENRICH_MAX_CALLS
+          ) {
+            enrichCalls += 1;
+            const extra = await enrichForAi(octokit, event, payload);
+            if (extra) raw = { ...event, _devpulse: extra };
+          }
           const reviewState =
             type === "REVIEW"
               ? reviewStateOf(
@@ -216,7 +317,7 @@ export const githubAdapter: ProviderAdapter = {
             occurredAt: new Date(event.created_at ?? Date.now()),
             reviewState,
             commitCount,
-            raw: event,
+            raw,
           });
         }
 

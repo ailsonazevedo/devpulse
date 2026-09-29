@@ -137,11 +137,16 @@ model Activity {
   repoUrl      String?
   occurredAt   DateTime
   raw          Json
+  // AI Pulse: ferramenta de IA detectada (claude/copilot/cursor/…) e o sinal
+  // que a revelou (trailer/marker/bot_author/branch). null = sem evidência.
+  aiTool       String?
+  aiSignal     String?
   createdAt    DateTime           @default(now())
 
   @@unique([connectionId, dedupeKey])
   @@index([userId, occurredAt])
   @@index([userId, provider, occurredAt])
+  @@index([userId, aiTool])
 }
 
 model DailyContribution {

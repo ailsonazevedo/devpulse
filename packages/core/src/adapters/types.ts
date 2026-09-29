@@ -1,4 +1,5 @@
 import type { ActivityType, Provider } from "@prisma/client";
+import type { AiEvidence } from "../ai-detect.js";
 
 /** Credenciais resolvidas (já descriptografadas) passadas ao adapter. */
 export interface Credentials {
@@ -98,6 +99,13 @@ export interface ProviderAdapter {
     creds: Credentials,
     cursor: SyncCursor | undefined,
   ): AsyncGenerator<ActivityPage, void, unknown>;
+
+  /**
+   * Extrai do payload cru (`NormalizedActivity.raw`) as evidências de uso de IA
+   * (mensagens, autores, branches) para o AI Pulse. Opera só sobre o `raw`
+   * persistido, permitindo re-detectar o histórico sem chamar a API.
+   */
+  aiEvidence?(raw: unknown): AiEvidence;
 
   /** Renova o access token (só OAuth). Ausente = não suporta refresh. */
   refreshToken?(creds: Credentials): Promise<{

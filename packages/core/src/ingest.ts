@@ -6,6 +6,7 @@ import {
   type DailyCount,
   type ProviderAdapter,
 } from "./adapters/index.js";
+import { detectAi, type AiAttribution } from "./ai-detect.js";
 import { decryptSecret, encryptSecret } from "./crypto.js";
 import { prisma } from "./db.js";
 
@@ -21,6 +22,14 @@ const BACKFILL_YEARS = Math.max(
   1,
   Number(process.env.HEATMAP_BACKFILL_YEARS ?? 10),
 );
+
+/** Lote do re-scan de IA sobre atividades já ingeridas. */
+const AI_REDETECT_BATCH = 1000;
+
+/** Atribuição de IA de um payload cru, via evidências do adapter. */
+function aiOf(adapter: ProviderAdapter, raw: unknown): AiAttribution | null {
+  return adapter.aiEvidence ? detectAi(adapter.aiEvidence(raw)) : null;
+}
 
 /** Monta as credenciais (descriptografadas) a partir da conexão. */
 function buildCreds(connection: ProviderConnection): Credentials {
@@ -112,23 +121,51 @@ async function ingestOnce(
     pages += 1;
     if (page.items.length > 0) {
       const created = await prisma.activity.createMany({
-        data: page.items.map((it) => ({
-          userId: connection.userId,
-          connectionId: connection.id,
-          provider: connection.provider,
-          type: it.type,
-          externalId: it.externalId,
-          dedupeKey: it.dedupeKey,
-          title: it.title,
-          url: it.url,
-          repoName: it.repoName ?? null,
-          repoUrl: it.repoUrl ?? null,
-          occurredAt: it.occurredAt,
-          raw: it.raw as Prisma.InputJsonValue,
-        })),
+        data: page.items.map((it) => {
+          const ai = aiOf(adapter, it.raw);
+          return {
+            userId: connection.userId,
+            connectionId: connection.id,
+            provider: connection.provider,
+            type: it.type,
+            externalId: it.externalId,
+            dedupeKey: it.dedupeKey,
+            title: it.title,
+            url: it.url,
+            repoName: it.repoName ?? null,
+            repoUrl: it.repoUrl ?? null,
+            occurredAt: it.occurredAt,
+            raw: it.raw as Prisma.InputJsonValue,
+            aiTool: ai?.tool ?? null,
+            aiSignal: ai?.signal ?? null,
+          };
+        }),
         skipDuplicates: true,
       });
       inserted += created.count;
+
+      // No backfill, linhas já existentes (ignoradas pelo createMany) recebem o
+      // raw atual — que pode trazer o enriquecimento de IA — e a atribuição.
+      if (mode === "backfill") {
+        const withAi = page.items.flatMap((it) => {
+          const ai = aiOf(adapter, it.raw);
+          return ai ? [{ it, ai }] : [];
+        });
+        if (withAi.length > 0) {
+          await prisma.$transaction(
+            withAi.map(({ it, ai }) =>
+              prisma.activity.updateMany({
+                where: { connectionId: connection.id, dedupeKey: it.dedupeKey },
+                data: {
+                  raw: it.raw as Prisma.InputJsonValue,
+                  aiTool: ai.tool,
+                  aiSignal: ai.signal,
+                },
+              }),
+            ),
+          );
+        }
+      }
 
       for (const it of page.items) {
         if (!earliest || it.occurredAt < earliest) earliest = it.occurredAt;
@@ -138,6 +175,9 @@ async function ingestOnce(
   }
 
   await writeHeatmap(connection, adapter, creds, earliest, mode);
+  // createMany ignora duplicatas: no backfill (conectar/resync), re-detecta a
+  // IA do histórico já ingerido — cobre linhas anteriores ao AI Pulse.
+  if (mode === "backfill") await redetectAi(connection.id, adapter);
 
   await prisma.providerConnection.update({
     where: { id: connection.id },
@@ -346,4 +386,48 @@ async function writeCalendarRollups(
         })),
     }),
   ]);
+}
+
+/**
+ * Recalcula aiTool/aiSignal das atividades de uma conexão a partir do `raw`
+ * persistido (sem chamar o provedor). Percorre em lotes e só grava o que mudou.
+ */
+export async function redetectAi(
+  connectionId: string,
+  adapter: ProviderAdapter,
+): Promise<number> {
+  if (!adapter.aiEvidence) return 0;
+  let updated = 0;
+  let after: string | undefined;
+  for (;;) {
+    const rows = await prisma.activity.findMany({
+      where: { connectionId },
+      orderBy: { id: "asc" },
+      take: AI_REDETECT_BATCH,
+      ...(after ? { cursor: { id: after }, skip: 1 } : {}),
+      select: { id: true, raw: true, aiTool: true, aiSignal: true },
+    });
+    if (rows.length === 0) break;
+    after = rows[rows.length - 1]!.id;
+
+    const changes = rows.flatMap((r) => {
+      const ai = aiOf(adapter, r.raw);
+      const tool = ai?.tool ?? null;
+      const signal = ai?.signal ?? null;
+      return tool === r.aiTool && signal === r.aiSignal
+        ? []
+        : [
+            prisma.activity.update({
+              where: { id: r.id },
+              data: { aiTool: tool, aiSignal: signal },
+            }),
+          ];
+    });
+    if (changes.length > 0) {
+      await prisma.$transaction(changes);
+      updated += changes.length;
+    }
+    if (rows.length < AI_REDETECT_BATCH) break;
+  }
+  return updated;
 }

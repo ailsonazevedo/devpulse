@@ -60,6 +60,23 @@ Ao conectar, um **backfill** é enfileirado; depois o worker roda sync
 - Multi-tenant: toda query é filtrada por `userId` da sessão.
 - OAuth com validação de `state` (CSRF) em cookie httpOnly.
 
+## AI Pulse
+
+Detecta atividades assistidas por IA (Claude, Copilot, Cursor, Codex, Devin,
+Gemini) a partir de, em ordem de força:
+
+1. trailers de commit — `Co-Authored-By` com coautor de IA, `Generated-by`, `Assisted-by`;
+2. rodapés das ferramentas — ex.: "🤖 Generated with Claude Code";
+3. autores bot de agentes — ex.: `copilot-swe-agent[bot]`;
+4. prefixos de branch — `claude/…`, `copilot/…`, `codex/…`.
+
+A lógica é pura (`packages/core/src/ai-detect.ts`); cada adapter expõe
+`aiEvidence(raw)`. Como a Events API do GitHub não traz mais as mensagens dos
+commits e a do GitLab só traz o título, o sync **enriquece** pushes (compare
+API) e PRs abertos, guardando em `raw._devpulse` (teto de 200 chamadas/sync).
+No GitLab, isso requer acesso ao código do projeto (papel ≥ Reporter).
+Um **Resync** reanalisa o histórico já ingerido.
+
 ## Scripts úteis
 
 | Comando | O quê |
@@ -77,4 +94,5 @@ Ao conectar, um **backfill** é enfileirado; depois o worker roda sync
 - [x] Ingestão idempotente + rollups + worker/agendador
 - [x] Feed unificado (filtros) + heatmap agregado + stats
 - [x] Heatmap anual: GitHub (GraphQL `contributionsCollection`) e GitLab (`calendar.json`)
+- [x] **AI Pulse** (`/ai`): % das entregas de código com participação de IA, por ferramenta e por semana
 - [ ] Refresh de token OAuth, observabilidade, Bitbucket/Gitea
