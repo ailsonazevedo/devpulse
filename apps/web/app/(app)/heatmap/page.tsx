@@ -3,10 +3,13 @@ import { auth } from "@/auth";
 import {
   getConnectedProviders,
   getContributionYears,
+  getEmbedToken,
   getHeatmap,
   getStats,
 } from "@/lib/queries";
 import { Heatmap } from "@/components/Heatmap";
+import { EmbedCard } from "@/components/EmbedCard";
+import { env } from "@/env";
 import { DISPLAY_TYPES, groupTypeLabel, typeGroup, typeMeta } from "@/components/labels";
 import { TypeIcon } from "@/components/icons";
 
@@ -26,10 +29,11 @@ export default async function HeatmapPage({
   const parsedYear = Number(sp.year);
   const year = years.includes(parsedYear) ? parsedYear : undefined;
 
-  const [days, stats, connected] = await Promise.all([
+  const [days, stats, connected, embedToken] = await Promise.all([
     getHeatmap(userId, { year }),
     getStats(userId),
     getConnectedProviders(userId),
+    getEmbedToken(userId),
   ]);
   const shownProviders = PROVIDERS.filter((p) => connected.includes(p));
 
@@ -55,6 +59,14 @@ export default async function HeatmapPage({
           providers={shownProviders}
           year={year}
           years={years}
+        />
+      </section>
+
+      <section className="card p-5">
+        <EmbedCard
+          initialToken={embedToken}
+          baseUrl={env.AUTH_URL.replace(/\/$/, "")}
+          providers={shownProviders}
         />
       </section>
 

@@ -122,6 +122,15 @@ export async function getConnectedProviders(userId: string): Promise<Provider[]>
   return rows.map((r) => r.provider);
 }
 
+/** Token público do embed do heatmap; null = embed desativado. */
+export async function getEmbedToken(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { embedToken: true },
+  });
+  return user?.embedToken ?? null;
+}
+
 export async function getConnections(userId: string) {
   return prisma.providerConnection.findMany({
     where: { userId },

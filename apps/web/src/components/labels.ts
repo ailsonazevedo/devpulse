@@ -1,13 +1,10 @@
 import type { ActivityType, Provider } from "@devpulse/core";
+import { PROVIDER_META } from "@devpulse/core/heatmap";
 
 export const providerMeta: Record<
   Provider,
   { label: string; color: string }
-> = {
-  GITHUB: { label: "GitHub", color: "#8957e5" },
-  GITLAB: { label: "GitLab", color: "#fc6d26" },
-  AZURE: { label: "Azure DevOps", color: "#0078d4" },
-};
+> = PROVIDER_META;
 
 /** Classe Tailwind de cor (texto) por tipo, para o badge de ícone no feed. */
 export const typeMeta: Record<ActivityType, { label: string; tint: string }> = {

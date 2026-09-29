@@ -12,3 +12,4 @@ export type { SyncResult } from "./ingest.js";
 export { syncQueue, enqueueSync, SYNC_QUEUE } from "./queues.js";
 export type { SyncJobData } from "./queues.js";
 export { redis } from "./redis.js";
+export * from "./heatmap/index.js";
