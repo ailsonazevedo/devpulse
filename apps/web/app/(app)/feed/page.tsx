@@ -10,6 +10,7 @@ import {
   relativeTime,
   typeMeta,
 } from "@/components/labels";
+import { AiBadge } from "@/components/AiBadge";
 import {
   ExternalLinkIcon,
   ProviderIcon,
@@ -168,6 +169,7 @@ export default async function FeedPage({
                         {it.repoName ?? providerMeta[it.provider].label}
                       </div>
                     </div>
+                    {it.aiTool && <AiBadge tool={it.aiTool} />}
                     <time className="shrink-0 text-xs text-neutral-400">
                       {relativeTime(it.occurredAt)}
                     </time>

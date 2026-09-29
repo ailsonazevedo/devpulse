@@ -76,3 +76,22 @@ export function relativeTime(date: Date): string {
   if (d < 30) return `${d}d atrás`;
   return date.toLocaleDateString("pt-BR");
 }
+
+/** Rótulos das ferramentas de IA detectadas pelo AI Pulse. */
+export const aiToolLabel: Record<string, string> = {
+  claude: "Claude",
+  copilot: "Copilot",
+  cursor: "Cursor",
+  codex: "Codex",
+  devin: "Devin",
+  gemini: "Gemini",
+  other: "Outra IA",
+};
+
+/** Como a IA foi detectada (exibido no tooltip/lista). */
+export const aiSignalLabel: Record<string, string> = {
+  trailer: "trailer do commit",
+  marker: "rodapé da ferramenta",
+  bot_author: "autor bot",
+  branch: "branch do agente",
+};

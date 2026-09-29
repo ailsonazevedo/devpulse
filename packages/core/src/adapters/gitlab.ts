@@ -12,6 +12,7 @@ import {
   type SyncCursor,
 } from "./types.js";
 import { oauthClient, refreshOAuthToken } from "./oauth.js";
+import type { AiEvidence } from "../ai-detect.js";
 
 interface GitlabCursor {
   lastEventId?: number;
@@ -25,7 +26,13 @@ export interface GitlabEvent {
   target_title: string | null;
   created_at: string;
   project_id: number | null;
-  push_data?: { commit_count?: number; ref?: string } | null;
+  push_data?: {
+    commit_count?: number;
+    ref?: string;
+    commit_title?: string | null;
+    commit_from?: string | null;
+    commit_to?: string | null;
+  } | null;
 }
 
 /** Dados do projeto usados para nome/URL no feed (resolvidos e cacheados). */
@@ -92,6 +99,45 @@ function describe(ev: GitlabEvent, host: string): string {
   return `${ev.action_name} ${ev.target_type ?? ""}${target}`.trim() || `Atividade em ${host}`;
 }
 
+/**
+ * O evento de push só traz o título do commit (sem trailers). Busca as
+ * mensagens completas (compare from...to, ou o commit único quando o push cria
+ * a branch) e guarda em `raw._devpulse`. Best-effort: falhas não quebram o sync.
+ */
+async function enrichPushForAi(
+  api: ReturnType<typeof makeClient>,
+  ev: GitlabEvent,
+  denied: Set<number>,
+): Promise<Record<string, unknown> | null> {
+  const pd = ev.push_data;
+  if (!ev.project_id || !pd?.commit_to || denied.has(ev.project_id)) return null;
+  type C = { message?: string; author_name?: string; author_email?: string };
+  const pick = (c: C) => ({
+    message: c.message,
+    author_name: c.author_name,
+    author_email: c.author_email,
+  });
+  try {
+    if (!pd.commit_from || /^0+$/.test(pd.commit_from)) {
+      const c = (await api.Commits.show(ev.project_id, pd.commit_to)) as unknown as C;
+      return { commits: [pick(c)] };
+    }
+    const cmp = (await api.Repositories.compare(
+      ev.project_id,
+      pd.commit_from,
+      pd.commit_to,
+    )) as unknown as { commits?: C[] };
+    return { commits: (cmp.commits ?? []).slice(-AI_ENRICH_MAX_COMMITS).map(pick) };
+  } catch (err) {
+    // Sem acesso ao código do projeto (ex.: token sem read_repository ou papel
+    // Guest): não insiste nos demais pushes dele neste sync.
+    const status = (err as { cause?: { response?: { status?: number } } }).cause
+      ?.response?.status;
+    if (status === 401 || status === 403) denied.add(ev.project_id);
+    return null; // SHA inexistente, rate-limit etc.: segue sem.
+  }
+}
+
 /** Deep-link para a entidade (MR/issue) quando há iid; senão a página do projeto. */
 function eventUrl(ev: GitlabEvent, project: GitlabProject | null): string | null {
   const web = project?.webUrl ?? null;
@@ -103,8 +149,29 @@ function eventUrl(ev: GitlabEvent, project: GitlabProject | null): string | null
   return web;
 }
 
+/**
+ * Evidências de IA de um evento do GitLab. A Events API só expõe o título do
+ * commit (sem trailers), então na prática a detecção vem da branch do push.
+ */
+export function gitlabAiEvidence(raw: unknown): AiEvidence {
+  const ev = (raw ?? {}) as Partial<GitlabEvent> & {
+    _devpulse?: { commits?: { message?: string; author_name?: string; author_email?: string }[] };
+  };
+  const commits = ev._devpulse?.commits ?? [];
+  return {
+    texts: [ev.push_data?.commit_title, ev.target_title, ...commits.map((c) => c.message)],
+    authors: commits.flatMap((c) => [c.author_name, c.author_email]),
+    branches: [ev.push_data?.ref],
+  };
+}
+
+/** Teto de chamadas extras por sync e de commits guardados por push. */
+const AI_ENRICH_MAX_CALLS = 200;
+const AI_ENRICH_MAX_COMMITS = 50;
+
 export const gitlabAdapter: ProviderAdapter = {
   provider: "GITLAB",
+  aiEvidence: gitlabAiEvidence,
 
   async getIdentity(creds: Credentials): Promise<Identity> {
     const api = makeClient(creds);
@@ -138,6 +205,8 @@ export const gitlabAdapter: ProviderAdapter = {
     const lastId = state.lastEventId ?? null;
     let maxSeen = lastId ?? 0;
     let page = 1;
+    let enrichCalls = 0;
+    const enrichDenied = new Set<number>();
 
     // Cache de projetos por sync: evita N chamadas repetidas ao mesmo project_id.
     const projectCache = new Map<number, GitlabProject | null>();
@@ -188,6 +257,16 @@ export const gitlabAdapter: ProviderAdapter = {
 
           const project = await resolveProject(ev.project_id);
           const type = mapType(ev);
+          let raw: unknown = ev;
+          if (
+            type === "PUSH" &&
+            enrichCalls < AI_ENRICH_MAX_CALLS &&
+            !(ev.project_id && enrichDenied.has(ev.project_id))
+          ) {
+            enrichCalls += 1;
+            const extra = await enrichPushForAi(api, ev, enrichDenied);
+            if (extra) raw = { ...ev, _devpulse: extra };
+          }
           items.push({
             type,
             externalId: String(ev.id),
@@ -201,7 +280,7 @@ export const gitlabAdapter: ProviderAdapter = {
             reviewState: reviewStateOf(ev),
             commitCount:
               type === "PUSH" ? (ev.push_data?.commit_count ?? null) : null,
-            raw: ev,
+            raw,
           });
         }
 

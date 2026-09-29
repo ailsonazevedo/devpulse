@@ -26,6 +26,7 @@ export async function getFeed(userId: string, filter: FeedFilter, limit = 100) {
       url: true,
       repoName: true,
       occurredAt: true,
+      aiTool: true,
     },
   });
 }
@@ -139,4 +140,89 @@ export async function getConnections(userId: string) {
       scopes: true,
     },
   });
+}
+
+/**
+ * Tipos em que a IA pode ser detectada (código entregue). Reviews, issues e
+ * comentários ficam fora do denominador para não diluir o percentual.
+ */
+const AI_CODE_TYPES: ActivityType[] = ["PUSH", "COMMIT", "PR", "MR"];
+const AI_WEEKS = 12;
+
+export interface AiWeek {
+  week: string; // YYYY-MM-DD (segunda-feira, UTC)
+  total: number;
+  ai: number;
+}
+
+/** AI Pulse: parcela das entregas de código com evidência de IA. */
+export async function getAiStats(userId: string) {
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - AI_WEEKS * 7);
+  since.setUTCHours(0, 0, 0, 0);
+  const codeWhere = { userId, type: { in: AI_CODE_TYPES } };
+
+  const [total, ai, byTool, weeks, recent] = await Promise.all([
+    prisma.activity.count({ where: codeWhere }),
+    prisma.activity.count({ where: { ...codeWhere, aiTool: { not: null } } }),
+    prisma.activity.groupBy({
+      by: ["aiTool"],
+      where: { userId, aiTool: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.$queryRaw<{ week: Date; total: number; ai: number }[]>`
+      SELECT
+        date_trunc('week', "occurredAt" AT TIME ZONE 'UTC') AS week,
+        count(*)::int AS total,
+        count("aiTool")::int AS ai
+      FROM "Activity"
+      WHERE "userId" = ${userId}
+        AND "type"::text IN ('PUSH', 'COMMIT', 'PR', 'MR')
+        AND "occurredAt" >= ${since}
+      GROUP BY week
+      ORDER BY week
+    `,
+    prisma.activity.findMany({
+      where: { userId, aiTool: { not: null } },
+      orderBy: { occurredAt: "desc" },
+      take: 8,
+      select: {
+        id: true,
+        provider: true,
+        type: true,
+        title: true,
+        url: true,
+        repoName: true,
+        occurredAt: true,
+        aiTool: true,
+        aiSignal: true,
+      },
+    }),
+  ]);
+
+  // Preenche semanas sem atividade para o eixo ficar contínuo.
+  const byWeek = new Map(
+    weeks.map((w) => [w.week.toISOString().slice(0, 10), w]),
+  );
+  const monday = new Date();
+  monday.setUTCHours(0, 0, 0, 0);
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const series: AiWeek[] = [];
+  for (let i = AI_WEEKS - 1; i >= 0; i--) {
+    const d = new Date(monday);
+    d.setUTCDate(d.getUTCDate() - i * 7);
+    const key = d.toISOString().slice(0, 10);
+    const w = byWeek.get(key);
+    series.push({ week: key, total: w?.total ?? 0, ai: w?.ai ?? 0 });
+  }
+
+  return {
+    total,
+    ai,
+    byTool: byTool
+      .map((t) => ({ tool: t.aiTool!, count: t._count._all }))
+      .sort((a, b) => b.count - a.count),
+    weeks: series,
+    recent,
+  };
 }

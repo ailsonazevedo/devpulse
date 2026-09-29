@@ -9,6 +9,7 @@ import {
   type ReviewState,
   type SyncCursor,
 } from "./types.js";
+import type { AiEvidence } from "../ai-detect.js";
 
 const API_VERSION = "7.1";
 /** connectionData nunca saiu de preview: precisa do sufixo -preview.1. */
@@ -162,8 +163,34 @@ function sinceParam(cursor: AzureCursor | undefined, key: keyof AzureCursor) {
   return d.toISOString();
 }
 
+/**
+ * Evidências de IA de um item do Azure: mensagem do commit (`comment`) ou
+ * título/descrição/branch/criador do PR. Work items não têm evidência.
+ */
+export function azureAiEvidence(raw: unknown): AiEvidence {
+  const r = (raw ?? {}) as {
+    comment?: string;
+    title?: string;
+    description?: string;
+    sourceRefName?: string;
+    author?: { name?: string; email?: string };
+    createdBy?: { uniqueName?: string; displayName?: string };
+  };
+  return {
+    texts: [r.comment, r.title, r.description],
+    authors: [
+      r.author?.name,
+      r.author?.email,
+      r.createdBy?.uniqueName,
+      r.createdBy?.displayName,
+    ],
+    branches: [r.sourceRefName],
+  };
+}
+
 export const azureAdapter: ProviderAdapter = {
   provider: "AZURE",
+  aiEvidence: azureAiEvidence,
 
   async getIdentity(creds: Credentials): Promise<Identity> {
     const base = orgBase(creds);
