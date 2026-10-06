@@ -7,16 +7,18 @@ import {
   type ProviderAdapter,
 } from "./adapters/index.js";
 import { detectAi, type AiAttribution } from "./ai-detect.js";
-import { decryptSecret, encryptSecret } from "./crypto.js";
+import {
+  buildCreds,
+  canRefresh,
+  isExpiring,
+  refreshConnection,
+} from "./connection-creds.js";
 import { prisma } from "./db.js";
 
 export interface SyncResult {
   inserted: number;
   pages: number;
 }
-
-/** Margem para refresh proativo: renova se faltar ≤ 60s para expirar. */
-const EXPIRY_SKEW_MS = 60_000;
 
 const BACKFILL_YEARS = Math.max(
   1,
@@ -29,65 +31,6 @@ const AI_REDETECT_BATCH = 1000;
 /** Atribuição de IA de um payload cru, via evidências do adapter. */
 function aiOf(adapter: ProviderAdapter, raw: unknown): AiAttribution | null {
   return adapter.aiEvidence ? detectAi(adapter.aiEvidence(raw)) : null;
-}
-
-/** Monta as credenciais (descriptografadas) a partir da conexão. */
-function buildCreds(connection: ProviderConnection): Credentials {
-  return {
-    accessToken: decryptSecret(connection.accessTokenEnc),
-    refreshToken: connection.refreshTokenEnc
-      ? decryptSecret(connection.refreshTokenEnc)
-      : null,
-    baseUrl: connection.baseUrl,
-    tokenType: connection.authMethod === "OAUTH" ? "oauth" : "pat",
-  };
-}
-
-/** Conexão OAuth, com refresh token e adapter que suporta refresh. */
-function canRefresh(
-  connection: ProviderConnection,
-  adapter: ProviderAdapter,
-): boolean {
-  return (
-    connection.authMethod === "OAUTH" &&
-    Boolean(adapter.refreshToken) &&
-    Boolean(connection.refreshTokenEnc)
-  );
-}
-
-function isExpiring(expiresAt: Date | null): boolean {
-  return (
-    expiresAt !== null && expiresAt.getTime() <= Date.now() + EXPIRY_SKEW_MS
-  );
-}
-
-/**
- * Renova o access token via refresh_token e persiste os novos segredos cifrados
- * (mantendo o refresh token anterior quando o provedor não o rotaciona).
- * Lança AuthError se o refresh falhar (refresh token revogado/expirado).
- */
-async function refreshConnection(
-  connection: ProviderConnection,
-  adapter: ProviderAdapter,
-): Promise<Credentials> {
-  const current = buildCreds(connection);
-  const refreshed = await adapter.refreshToken!(current);
-  await prisma.providerConnection.update({
-    where: { id: connection.id },
-    data: {
-      accessTokenEnc: encryptSecret(refreshed.accessToken),
-      refreshTokenEnc: refreshed.refreshToken
-        ? encryptSecret(refreshed.refreshToken)
-        : connection.refreshTokenEnc,
-      tokenExpiresAt: refreshed.expiresAt ?? null,
-    },
-  });
-  return {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken ?? current.refreshToken,
-    baseUrl: connection.baseUrl,
-    tokenType: "oauth",
-  };
 }
 
 async function persistErrorStatus(

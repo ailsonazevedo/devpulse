@@ -7,6 +7,7 @@ const nav = [
   { href: "/feed", label: "Feed" },
   { href: "/heatmap", label: "Heatmap" },
   { href: "/ai", label: "AI Pulse" },
+  { href: "/tasks", label: "Tarefas" },
   { href: "/connections", label: "Conexões" },
 ];
 
@@ -15,7 +16,7 @@ export function NavLinks() {
   return (
     <nav className="flex gap-1 text-sm">
       {nav.map((n) => {
-        const active = pathname === n.href;
+        const active = pathname === n.href || pathname.startsWith(`${n.href}/`);
         return (
           <Link
             key={n.href}

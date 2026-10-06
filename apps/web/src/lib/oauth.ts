@@ -12,6 +12,11 @@ export interface OAuthProviderConfig {
   apiBaseUrl?: string;
 }
 
+/**
+ * Escopos incluem escrita de issues/work items e boards (gestão de tarefas).
+ * Mantenha em sincronia com WORK_SCOPES (@devpulse/core/work): conexões com
+ * escopos antigos aparecem com aviso de "reconectar".
+ */
 export const OAUTH: Record<Provider, OAuthProviderConfig> = {
   GITHUB: {
     provider: "GITHUB",
@@ -19,7 +24,7 @@ export const OAUTH: Record<Provider, OAuthProviderConfig> = {
     clientSecret: env.GITHUB_CLIENT_SECRET,
     authorizeUrl: "https://github.com/login/oauth/authorize",
     tokenUrl: "https://github.com/login/oauth/access_token",
-    scope: "read:user repo",
+    scope: "read:user repo project read:org",
   },
   GITLAB: {
     provider: "GITLAB",
@@ -27,7 +32,7 @@ export const OAUTH: Record<Provider, OAuthProviderConfig> = {
     clientSecret: env.GITLAB_CLIENT_SECRET,
     authorizeUrl: "https://gitlab.com/oauth/authorize",
     tokenUrl: "https://gitlab.com/oauth/token",
-    scope: "read_user read_api",
+    scope: "read_user api",
   },
   // Azure DevOps: por enquanto é PAT-first — sem CLIENT_ID/SECRET o botão OAuth
   // aparece desabilitado. As URLs ficam preenchidas para completar o OAuth
@@ -38,7 +43,7 @@ export const OAUTH: Record<Provider, OAuthProviderConfig> = {
     clientSecret: env.AZURE_CLIENT_SECRET,
     authorizeUrl: "https://app.vssps.visualstudio.com/oauth2/authorize",
     tokenUrl: "https://app.vssps.visualstudio.com/oauth2/token",
-    scope: "vso.code vso.work",
+    scope: "vso.code vso.work_write",
   },
 };
 

@@ -2,6 +2,7 @@ import type { Provider } from "@devpulse/core";
 import { auth } from "@/auth";
 import { getConnections } from "@/lib/queries";
 import { isOAuthConfigured } from "@/lib/oauth";
+import { missingWorkScopes } from "@devpulse/core/work";
 import {
   ConnectionsManager,
   type ConnectionView,
@@ -26,6 +27,8 @@ export default async function ConnectionsPage({
     status: c.status,
     statusDetail: c.statusDetail,
     lastSyncedAt: c.lastSyncedAt ? c.lastSyncedAt.toISOString() : null,
+    missingScopes:
+      c.status === "REVOKED" ? [] : missingWorkScopes(c.provider, c.authMethod, c.scopes),
   }));
 
   const oauthConfigured: Record<Provider, boolean> = {

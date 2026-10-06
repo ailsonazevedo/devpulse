@@ -19,6 +19,8 @@ export interface ConnectionView {
   status: string;
   statusDetail: string | null;
   lastSyncedAt: string | null;
+  /** escopos OAuth que faltam para gerenciar tarefas (escrita/boards). */
+  missingScopes: string[];
 }
 
 const PROVIDERS: Provider[] = ["GITHUB", "GITLAB", "AZURE"];
@@ -97,6 +99,15 @@ export function ConnectionsManager({
                         : "nunca sincronizado"}
                     </span>
                   </div>
+                  {c.missingScopes.length > 0 && (
+                    <a
+                      href={`/api/oauth/${c.provider.toLowerCase()}/start`}
+                      title={`Faltam: ${c.missingScopes.join(", ")}`}
+                      className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-amber-700 hover:underline dark:text-amber-400"
+                    >
+                      Reconectar para gerenciar tarefas e boards
+                    </a>
+                  )}
                 </div>
                 <button
                   onClick={() => resync(c.id)}
@@ -268,9 +279,10 @@ function PatForm({
         />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-neutral-400">
-            Escopos mínimos: GitHub <code>read:user, repo</code> · GitLab{" "}
-            <code>read_user, read_api</code> · Azure DevOps{" "}
-            <code>Code (read), Work Items (read)</code>.
+            Escopos: GitHub <code>read:user, repo, project</code> · GitLab{" "}
+            <code>read_user, api</code> · Azure DevOps{" "}
+            <code>Code (read), Work Items (read &amp; write)</code>. Só leitura
+            basta para o feed; escrita habilita gerenciar tarefas.
           </p>
           <button type="submit" disabled={loading} className="btn-primary shrink-0">
             {loading ? "Validando…" : "Conectar"}

@@ -10,7 +10,8 @@
     "./queues": "./src/queues.ts",
     "./crypto": "./src/crypto.ts",
     "./db": "./src/db.ts",
-    "./heatmap": "./src/heatmap/index.ts"
+    "./heatmap": "./src/heatmap/index.ts",
+    "./work": "./src/work/index.ts"
   },
   "scripts": {
     "db:generate": "prisma generate",

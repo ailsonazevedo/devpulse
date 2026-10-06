@@ -1,4 +1,6 @@
 import { type ActivityType, type Provider, prisma } from "@devpulse/core";
+import { missingWorkScopes } from "@devpulse/core/work";
+import type { WorkConnection } from "@/components/work/api";
 
 export interface FeedFilter {
   provider?: Provider;
@@ -234,4 +236,28 @@ export async function getAiStats(userId: string) {
     weeks: series,
     recent,
   };
+}
+
+/** Conexões utilizáveis nas telas de tarefas (não revogadas), sem segredos. */
+export async function getWorkConnections(userId: string): Promise<WorkConnection[]> {
+  const rows = await prisma.providerConnection.findMany({
+    where: { userId, status: { not: "REVOKED" } },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      provider: true,
+      authMethod: true,
+      baseUrl: true,
+      externalLogin: true,
+      scopes: true,
+    },
+  });
+  return rows.map((c) => ({
+    id: c.id,
+    provider: c.provider,
+    login: c.externalLogin,
+    baseUrl: c.baseUrl || null,
+    authMethod: c.authMethod,
+    missingScopes: missingWorkScopes(c.provider, c.authMethod, c.scopes),
+  }));
 }
