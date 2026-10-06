@@ -6,6 +6,7 @@ import { providerMeta, relativeTime } from "@/components/labels";
 import { ExternalLinkIcon, ProviderIcon } from "@/components/icons";
 import { friendlyError, itemUrl, workFetch, type WorkConnection } from "./api";
 import { Avatars, StateBadge } from "./bits";
+import { LabelPicker } from "./LabelPicker";
 
 const splitList = (s: string) =>
   s
@@ -35,7 +36,7 @@ export function TaskDrawer({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [state, setState] = useState("");
-  const [labels, setLabels] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
   const [assignees, setAssignees] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -47,7 +48,7 @@ export function TaskDrawer({
     setTitle(d.title);
     setBody(d.body);
     setState(d.rawState);
-    setLabels(d.labels.join(", "));
+    setLabels(d.labels);
     setAssignees(d.assignees.map((a) => a.login).join(", "));
   }
 
@@ -78,8 +79,7 @@ export function TaskDrawer({
     if (title.trim() !== detail.title) out.title = title.trim();
     if (body !== detail.body) out.body = body;
     if (state !== detail.rawState) out.state = state;
-    const l = splitList(labels);
-    if (!sameList(l, detail.labels)) out.labels = l;
+    if (!sameList(labels, detail.labels)) out.labels = labels;
     const a = splitList(assignees);
     if (!sameList(a, detail.assignees.map((x) => x.login))) out.assignees = a;
     return out;
@@ -207,15 +207,15 @@ export function TaskDrawer({
               </span>
             </div>
 
-            <label className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
+            <div className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
               Labels {detail.provider === "AZURE" && "(tags)"}
-              <input
+              <LabelPicker
+                connectionId={connection.id}
+                containerId={detail.container.id}
                 value={labels}
-                onChange={(e) => setLabels(e.target.value)}
-                placeholder="separadas por vírgula"
-                className="input font-normal"
+                onChange={setLabels}
               />
-            </label>
+            </div>
             <label className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
               <span className="flex items-center gap-2">
                 Responsáveis

@@ -14,7 +14,7 @@ export async function GET(
   const { connectionId } = await ctx.params;
   const ref = req.nextUrl.searchParams.get("ref");
   return withWorkConnection(connectionId, (adapter, creds) =>
-    adapter.listComments(creds, Ref.parse(ref)),
+    adapter.listComments(creds, Ref.parse(ref ?? "")),
   );
 }
 
@@ -26,6 +26,6 @@ export async function POST(
   const ref = req.nextUrl.searchParams.get("ref");
   const json = await req.json().catch(() => ({}));
   return withWorkConnection(connectionId, (adapter, creds) =>
-    adapter.addComment(creds, Ref.parse(ref), CommentBody.parse(json).body),
+    adapter.addComment(creds, Ref.parse(ref ?? ""), CommentBody.parse(json).body),
   );
 }

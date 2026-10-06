@@ -10,6 +10,6 @@ export async function GET(
   const { connectionId } = await ctx.params;
   const id = req.nextUrl.searchParams.get("id");
   return withWorkConnection(connectionId, (adapter, creds) =>
-    adapter.getBoard(creds, z.string().min(1, "board obrigatório").parse(id)),
+    adapter.getBoard(creds, z.string().min(1, "board obrigatório").parse(id ?? "")),
   );
 }

@@ -18,6 +18,7 @@ import type {
   WorkContainer,
   WorkItem,
   WorkItemDetail,
+  WorkLabel,
   WorkUser,
 } from "./types.js";
 
@@ -385,6 +386,21 @@ export const githubWork: WorkAdapter = {
     return res.data
       .filter((r) => r.has_issues && !r.archived)
       .map((r) => ({ id: r.full_name, name: r.full_name, url: r.html_url }));
+  },
+
+  async listLabels(creds, containerId): Promise<WorkLabel[]> {
+    const api = makeClient(creds);
+    const labels = await gh(() =>
+      api.paginate(api.rest.issues.listLabelsForRepo, {
+        ...ownerRepo(containerId),
+        per_page: 100,
+      }),
+    );
+    return labels.map((l) => ({
+      name: l.name,
+      color: l.color ? `#${l.color}` : null,
+      description: l.description ?? null,
+    }));
   },
 
   async listBoards(creds): Promise<BoardSummary[]> {

@@ -64,6 +64,13 @@ export interface WorkComment {
   createdAt: string;
 }
 
+export interface WorkLabel {
+  name: string;
+  /** cor hex com "#" (Azure: tags não têm cor). */
+  color?: string | null;
+  description?: string | null;
+}
+
 export interface ListFilter {
   state?: WorkState | "all";
   involvement?: Involvement;
@@ -147,6 +154,8 @@ export interface WorkAdapter {
   ): Promise<WorkComment>;
   /** Repos/projetos onde o usuário pode criar itens. */
   listContainers(creds: Credentials): Promise<WorkContainer[]>;
+  /** Labels (tags no Azure) disponíveis num repositório/projeto. */
+  listLabels(creds: Credentials, containerId: string): Promise<WorkLabel[]>;
   listBoards(creds: Credentials): Promise<BoardSummary[]>;
   getBoard(creds: Credentials, boardId: string): Promise<Board>;
   moveCard(

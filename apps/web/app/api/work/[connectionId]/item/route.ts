@@ -22,7 +22,7 @@ export async function GET(
   const { connectionId } = await ctx.params;
   const ref = req.nextUrl.searchParams.get("ref");
   return withWorkConnection(connectionId, (adapter, creds) =>
-    adapter.getItem(creds, Ref.parse(ref)),
+    adapter.getItem(creds, Ref.parse(ref ?? "")),
   );
 }
 
@@ -35,6 +35,6 @@ export async function PATCH(
   const ref = req.nextUrl.searchParams.get("ref");
   const json = await req.json().catch(() => ({}));
   return withWorkConnection(connectionId, (adapter, creds) =>
-    adapter.updateItem(creds, Ref.parse(ref), UpdateBody.parse(json)),
+    adapter.updateItem(creds, Ref.parse(ref ?? ""), UpdateBody.parse(json)),
   );
 }

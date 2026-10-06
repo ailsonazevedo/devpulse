@@ -12,12 +12,14 @@ import type {
   WorkContainer,
   WorkItem,
   WorkItemDetail,
+  WorkLabel,
   WorkUser,
   WorkState,
 } from "./types.js";
 
 const API = "api-version=7.1";
 const COMMENTS_API = "api-version=7.1-preview.4";
+const TAGS_API = "api-version=7.1-preview.1";
 const PER_PAGE = 30;
 /** Teto de ids do WIQL na listagem (paginada por offset sobre eles). */
 const WIQL_TOP = 1000;
@@ -423,6 +425,17 @@ export const azureWork: WorkAdapter = {
   },
 
   listContainers: listProjects,
+
+  async listLabels(creds, containerId): Promise<WorkLabel[]> {
+    const res = await call<{ value: { name: string }[] }>(
+      creds,
+      "GET",
+      `${orgBase(creds)}/${encodeURIComponent(containerId)}/_apis/wit/tags?${TAGS_API}`,
+    );
+    return res.value
+      .map((t) => ({ name: t.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
 
   async listBoards(creds): Promise<BoardSummary[]> {
     const base = orgBase(creds);

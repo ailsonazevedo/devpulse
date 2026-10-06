@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Provider } from "@devpulse/core";
 import { providerMeta } from "@/components/labels";
-import { ProviderIcon } from "@/components/icons";
+import { DownloadIcon, ProviderIcon } from "@/components/icons";
 
 type Theme = "auto" | "light" | "dark";
 type ColorBy = "level" | "provider";
@@ -17,6 +17,40 @@ const COLORS: { value: ColorBy; label: string }[] = [
   { value: "level", label: "Nível" },
   { value: "provider", label: "Provedor" },
 ];
+
+/** Escala do PNG: 2x fica nítido em telas retina e slides. */
+const PNG_SCALE = 2;
+
+/** Dispara o download de um blob no navegador. */
+function saveBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+/** Rasteriza o SVG num canvas (fundo e fontes já vêm no próprio SVG). */
+async function svgToPng(svg: string): Promise<Blob> {
+  const src = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth * PNG_SCALE;
+    canvas.height = img.naturalHeight * PNG_SCALE;
+    const ctx = canvas.getContext("2d")!;
+    ctx.scale(PNG_SCALE, PNG_SCALE);
+    ctx.drawImage(img, 0, 0);
+    return await new Promise((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob"))), "image/png"),
+    );
+  } finally {
+    URL.revokeObjectURL(src);
+  }
+}
 
 /**
  * Configura o link público do heatmap (SVG) para colar no README do perfil do
@@ -40,8 +74,11 @@ export function EmbedCard({
   const [header, setHeader] = useState(true);
   const [selected, setSelected] = useState<Set<Provider>>(new Set(providers));
   const [copied, setCopied] = useState<string | null>(null);
-  // cache-buster só da prévia: a URL publicada fica estável
-  const [nonce] = useState(() => Date.now());
+  const [downloading, setDownloading] = useState<"png" | "svg" | null>(null);
+  // cache-buster só da prévia (a URL publicada fica estável). Gerado após
+  // montar: Date.now() no render difere entre SSR e cliente (hydration mismatch).
+  const [nonce, setNonce] = useState<number | null>(null);
+  useEffect(() => setNonce(Date.now()), []);
 
   const url = useMemo(() => {
     if (!token) return null;
@@ -95,6 +132,39 @@ export function EmbedCard({
     await navigator.clipboard.writeText(text);
     setCopied(key);
     setTimeout(() => setCopied((c) => (c === key ? null : c)), 1500);
+  }
+
+  /**
+   * Baixa a imagem com as opções atuais. No tema "Automático" o arquivo fixa o
+   * tema do sistema agora (uma imagem baixada não acompanha o modo escuro).
+   */
+  async function download(format: "png" | "svg") {
+    if (!url) return;
+    setDownloading(format);
+    setError(null);
+    try {
+      const resolved =
+        theme === "auto"
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light"
+          : theme;
+      const u = new URL(url);
+      u.searchParams.set("theme", resolved);
+      // Caminho relativo: same-origin mesmo se o app for aberto por outro host.
+      const res = await fetch(u.pathname + u.search, { cache: "no-store" });
+      if (!res.ok) throw new Error();
+      const svg = await res.text();
+      const name = `devpulse-heatmap-${new Date().toISOString().slice(0, 10)}.${format}`;
+      saveBlob(
+        format === "svg" ? new Blob([svg], { type: "image/svg+xml" }) : await svgToPng(svg),
+        name,
+      );
+    } catch {
+      setError("Não foi possível gerar a imagem. Tente novamente.");
+    } finally {
+      setDownloading(null);
+    }
   }
 
   const toggle = (p: Provider) =>
@@ -166,12 +236,41 @@ export function EmbedCard({
           </div>
 
           <div className="overflow-x-auto rounded-lg border border-dashed border-neutral-200 p-3 dark:border-neutral-800">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`${url}${url!.includes("?") ? "&" : "?"}v=${nonce}`}
-              alt="Prévia do heatmap"
-              className="max-w-none"
-            />
+            {nonce === null ? (
+              <div className="h-32 animate-pulse rounded bg-neutral-100 dark:bg-neutral-800/60" />
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`${url}${url!.includes("?") ? "&" : "?"}v=${nonce}`}
+                alt="Prévia do heatmap"
+                className="max-w-none"
+              />
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-20 shrink-0 text-xs text-neutral-500">Baixar</span>
+            <button
+              className="btn-ghost"
+              disabled={downloading !== null}
+              onClick={() => download("png")}
+            >
+              <DownloadIcon className="h-4 w-4" />
+              {downloading === "png" ? "Gerando…" : "PNG"}
+            </button>
+            <button
+              className="btn-ghost"
+              disabled={downloading !== null}
+              onClick={() => download("svg")}
+            >
+              <DownloadIcon className="h-4 w-4" />
+              {downloading === "svg" ? "Gerando…" : "SVG"}
+            </button>
+            {theme === "auto" && (
+              <span className="text-xs text-neutral-400">
+                no tema atual do sistema
+              </span>
+            )}
           </div>
 
           <div className="flex flex-col gap-2">

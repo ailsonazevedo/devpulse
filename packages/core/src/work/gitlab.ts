@@ -12,6 +12,7 @@ import type {
   WorkContainer,
   WorkItem,
   WorkItemDetail,
+  WorkLabel,
   WorkUser,
 } from "./types.js";
 
@@ -334,6 +335,21 @@ export const gitlabWork: WorkAdapter = {
   async listContainers(creds): Promise<WorkContainer[]> {
     const projects = await listProjects(creds);
     return projects.map((p) => ({ id: String(p.id), name: p.path_with_namespace, url: p.web_url }));
+  },
+
+  async listLabels(creds, containerId): Promise<WorkLabel[]> {
+    // Inclui as labels herdadas dos grupos (include_ancestor_groups, default true).
+    const { data } = await call<{ name: string; color?: string; description?: string | null }[]>(
+      creds,
+      "GET",
+      `/projects/${encodeURIComponent(containerId)}/labels`,
+      { per_page: 100 },
+    );
+    return data.map((l) => ({
+      name: l.name,
+      color: l.color ?? null,
+      description: l.description ?? null,
+    }));
   },
 
   async listBoards(creds): Promise<BoardSummary[]> {

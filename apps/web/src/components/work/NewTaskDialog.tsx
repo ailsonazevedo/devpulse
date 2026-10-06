@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { WorkContainer, WorkItem } from "@devpulse/core/work";
 import { providerMeta } from "@/components/labels";
 import { friendlyError, workFetch, type WorkConnection } from "./api";
+import { LabelPicker } from "./LabelPicker";
 
 /** Modal de criação: conexão → repositório/projeto → título/descrição/labels. */
 export function NewTaskDialog({
@@ -20,7 +21,7 @@ export function NewTaskDialog({
   const [containerId, setContainerId] = useState("");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [labels, setLabels] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +30,7 @@ export function NewTaskDialog({
     let alive = true;
     setContainers(null);
     setContainerId("");
+    setLabels([]);
     workFetch<WorkContainer[]>(`/api/work/${connectionId}/containers`)
       .then((c) => {
         if (!alive) return;
@@ -56,10 +58,7 @@ export function NewTaskDialog({
           containerId,
           title,
           body: body || undefined,
-          labels: labels
-            .split(",")
-            .map((l) => l.trim())
-            .filter(Boolean),
+          labels,
         },
       });
       onCreated(item, connectionId);
@@ -97,7 +96,10 @@ export function NewTaskDialog({
           </select>
           <select
             value={containerId}
-            onChange={(e) => setContainerId(e.target.value)}
+            onChange={(e) => {
+              setContainerId(e.target.value);
+              setLabels([]); // labels são por repositório/projeto
+            }}
             disabled={!containers || containers.length === 0}
             className="input min-w-0 flex-1"
             aria-label="Repositório ou projeto"
@@ -127,11 +129,12 @@ export function NewTaskDialog({
           rows={5}
           className="input text-sm"
         />
-        <input
+        <LabelPicker
+          connectionId={connectionId}
+          containerId={containerId || null}
           value={labels}
-          onChange={(e) => setLabels(e.target.value)}
-          placeholder="Labels separadas por vírgula (opcional)"
-          className="input"
+          onChange={setLabels}
+          placeholder="Labels (opcional)"
         />
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
