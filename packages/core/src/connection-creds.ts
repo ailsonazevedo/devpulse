@@ -83,6 +83,7 @@ export class ConnectionNotFoundError extends Error {
  * (chamadas ao vivo na API do provedor, fora do sync). Renova o token OAuth
  * proativamente e, se `fn` lançar AuthError, renova e repete 1x. Se o refresh
  * também falhar (ou não for possível), marca a conexão como REVOKED.
+ * As credenciais levam `cacheScope` = id da conexão (cache de metadados).
  */
 export async function withConnection<T>(
   connectionId: string,
@@ -104,12 +105,13 @@ export async function withConnection<T>(
       creds = await refreshConnection(connection, adapter);
       didRefresh = true;
     }
+    const scoped = (c: Credentials) => ({ ...c, cacheScope: connection.id });
     try {
-      return await fn(creds, connection);
+      return await fn(scoped(creds), connection);
     } catch (err) {
       if (!(err instanceof AuthError) || didRefresh || !refreshable) throw err;
       creds = await refreshConnection(connection, adapter);
-      return await fn(creds, connection);
+      return await fn(scoped(creds), connection);
     }
   } catch (err) {
     if (err instanceof AuthError) {

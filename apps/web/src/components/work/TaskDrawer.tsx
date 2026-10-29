@@ -1,24 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { UpdateItemInput, WorkComment, WorkItem, WorkItemDetail } from "@devpulse/core/work";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type {
+  UpdateItemInput,
+  WorkComment,
+  WorkItem,
+  WorkItemDetail,
+  WorkLink,
+} from "@devpulse/core/work";
 import { providerMeta, relativeTime } from "@/components/labels";
 import { ExternalLinkIcon, ProviderIcon } from "@/components/icons";
 import { friendlyError, itemUrl, workFetch, type WorkConnection } from "./api";
 import { Avatars, StateBadge } from "./bits";
 import { LabelPicker } from "./LabelPicker";
-import { buildClaudeCommand } from "./claude";
-
-const splitList = (s: string) =>
-  s
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
+import { AssigneePicker } from "./AssigneePicker";
+import { FieldsEditor, changedFields, fieldValuesOf, type FieldValues } from "./FieldsEditor";
+import { buildClaudeCommand, slugify } from "./claude";
+import { invalidateLists, useComments, useTaskDetail, workKeys } from "./queries";
 
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Painel lateral: detalhe, edição (título/corpo/estado/labels/responsáveis) e comentários. */
+/** Painel lateral: detalhe, edição (título/corpo/estado/labels/responsáveis/campos), branches e comentários. */
 export function TaskDrawer({
   connection,
   item,
@@ -30,15 +34,21 @@ export function TaskDrawer({
   onClose: () => void;
   onChanged?: (item: WorkItemDetail) => void;
 }) {
+  const qc = useQueryClient();
+  const detailQuery = useTaskDetail(connection.id, item.ref);
+  const commentsQuery = useComments(connection.id, item.ref);
+  const comments = commentsQuery.data ?? (commentsQuery.isError ? [] : null);
+  /** Base do formulário: o último detalhe aplicado (não muda sob edição em curso). */
   const [detail, setDetail] = useState<WorkItemDetail | null>(null);
-  const [comments, setComments] = useState<WorkComment[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const dirtyRef = useRef(false);
 
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [state, setState] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
-  const [assignees, setAssignees] = useState("");
+  const [assignees, setAssignees] = useState<string[]>([]);
+  const [fieldVals, setFieldVals] = useState<FieldValues>({});
   const [saving, setSaving] = useState(false);
 
   const [comment, setComment] = useState("");
@@ -51,22 +61,14 @@ export function TaskDrawer({
     setBody(d.body);
     setState(d.rawState);
     setLabels(d.labels);
-    setAssignees(d.assignees.map((a) => a.login).join(", "));
+    setAssignees(d.assignees.map((a) => a.login));
+    setFieldVals(fieldValuesOf(d.fields));
   }
 
+  // Cache aparece na hora; a revalidação só reaplica se não houver edição em curso.
   useEffect(() => {
-    let alive = true;
-    const url = itemUrl(connection.id, item.ref);
-    workFetch<WorkItemDetail>(url)
-      .then((d) => alive && fill(d))
-      .catch((e) => alive && setError(friendlyError(e)));
-    workFetch<WorkComment[]>(itemUrl(connection.id, item.ref, "/comments"))
-      .then((c) => alive && setComments(c))
-      .catch(() => alive && setComments([]));
-    return () => {
-      alive = false;
-    };
-  }, [connection.id, item.ref]);
+    if (detailQuery.data && !dirtyRef.current) fill(detailQuery.data);
+  }, [detailQuery.data]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -82,8 +84,9 @@ export function TaskDrawer({
     if (body !== detail.body) out.body = body;
     if (state !== detail.rawState) out.state = state;
     if (!sameList(labels, detail.labels)) out.labels = labels;
-    const a = splitList(assignees);
-    if (!sameList(a, detail.assignees.map((x) => x.login))) out.assignees = a;
+    if (!sameList(assignees, detail.assignees.map((x) => x.login))) out.assignees = assignees;
+    const f = changedFields(detail.fields, fieldVals);
+    if (Object.keys(f).length > 0) out.fields = f;
     return out;
   }
 
@@ -96,8 +99,11 @@ export function TaskDrawer({
         method: "PATCH",
         body: patch,
       });
+      qc.setQueryData(workKeys.item(connection.id, item.ref), d);
+      dirtyRef.current = false;
       fill(d);
       onChanged?.(d);
+      invalidateLists(qc, connection.id);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -115,7 +121,10 @@ export function TaskDrawer({
         method: "POST",
         body: { body: comment },
       });
-      setComments((prev) => [...(prev ?? []), c]);
+      qc.setQueryData<WorkComment[]>(workKeys.comments(connection.id, item.ref), (prev) => [
+        ...(prev ?? []),
+        c,
+      ]);
       setComment("");
     } catch (err) {
       setError(friendlyError(err));
@@ -135,6 +144,8 @@ export function TaskDrawer({
   }
 
   const dirty = Object.keys(changes()).length > 0;
+  dirtyRef.current = dirty;
+  const loadError = !detail && detailQuery.error ? friendlyError(detailQuery.error) : null;
   const closedState = detail?.availableStates.find((s) => /^(closed|done)$/i.test(s));
   const openState = detail?.availableStates.find((s) => /^(open|opened|new|active|to do)$/i.test(s));
 
@@ -171,14 +182,14 @@ export function TaskDrawer({
           </button>
         </header>
 
-        {error && (
+        {(error ?? loadError) && (
           <p className="mx-4 mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">
-            {error}
+            {error ?? loadError}
           </p>
         )}
 
         {!detail ? (
-          !error && <DrawerSkeleton />
+          !loadError && <DrawerSkeleton />
         ) : (
           <div className="flex flex-col gap-4 p-4">
             <input
@@ -235,22 +246,23 @@ export function TaskDrawer({
                 onChange={setLabels}
               />
             </div>
-            <label className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
-              <span className="flex items-center gap-2">
-                Responsáveis
-                <Avatars users={detail.assignees} />
-              </span>
-              <input
+            <div className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
+              {detail.provider === "AZURE" ? "Responsável" : "Responsáveis"}
+              <AssigneePicker
+                connectionId={connection.id}
+                containerId={detail.container.id}
                 value={assignees}
-                onChange={(e) => setAssignees(e.target.value)}
-                placeholder={
-                  detail.provider === "AZURE"
-                    ? "e-mail do responsável (apenas um)"
-                    : "logins separados por vírgula"
-                }
-                className="input font-normal"
+                onChange={setAssignees}
+                single={detail.provider === "AZURE"}
+                known={detail.assignees}
               />
-            </label>
+            </div>
+            <FieldsEditor
+              fields={detail.fields}
+              values={fieldVals}
+              onChange={(id, v) => setFieldVals((prev) => ({ ...prev, [id]: v }))}
+              disabled={saving}
+            />
             <label className="flex flex-col gap-1 text-xs font-medium text-neutral-500">
               Descrição
               <textarea
@@ -282,6 +294,16 @@ export function TaskDrawer({
                 {saving ? "Salvando…" : "Salvar alterações"}
               </button>
             </div>
+
+            <DevelopmentSection
+              connectionId={connection.id}
+              detail={detail}
+              onCreated={(link) => {
+                const add = (d?: WorkItemDetail) => (d ? { ...d, links: [...d.links, link] } : d);
+                setDetail((d) => add(d ?? undefined) ?? null);
+                qc.setQueryData<WorkItemDetail>(workKeys.item(connection.id, item.ref), add);
+              }}
+            />
 
             <section className="flex flex-col gap-3 border-t border-neutral-200 pt-4 dark:border-neutral-800">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
@@ -330,6 +352,131 @@ export function TaskDrawer({
         )}
       </aside>
     </div>
+  );
+}
+
+/** Nome sugerido: `<número>-<slug>` (o GitLab liga à issue as branches com esse prefixo). */
+export function suggestBranch(item: Pick<WorkItem, "number" | "title">): string {
+  const n = item.number.replace(/[^0-9]/g, "");
+  return [n, slugify(item.title)].filter(Boolean).join("-") || "task";
+}
+
+/** Branches e PRs/MRs vinculados + criação de branch a partir da principal. */
+function DevelopmentSection({
+  connectionId,
+  detail,
+  onCreated,
+}: {
+  connectionId: string;
+  detail: WorkItemDetail;
+  onCreated: (link: WorkLink) => void;
+}) {
+  const repos = detail.branchRepositories;
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState(() => suggestBranch(detail));
+  const [repo, setRepo] = useState(
+    () => repos?.find((r) => r.name === detail.container.name)?.id ?? repos?.[0]?.id ?? "",
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const link = await workFetch<WorkLink>(itemUrl(connectionId, detail.ref, "/branch"), {
+        method: "POST",
+        body: { name: name.trim(), repositoryId: repo || undefined },
+      });
+      onCreated(link);
+      setCreating(false);
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          Desenvolvimento
+        </h3>
+        {!creating && (repos === null || repos.length > 0) && (
+          <button onClick={() => setCreating(true)} className="btn-ghost px-2 py-1 text-xs">
+            Criar branch
+          </button>
+        )}
+      </div>
+      {detail.links.length === 0 && !creating && (
+        <p className="text-xs text-neutral-400">Nenhuma branch ou PR vinculado.</p>
+      )}
+      {detail.links.length > 0 && (
+        <ul className="flex flex-col gap-1 text-sm">
+          {detail.links.map((l, i) => (
+            <li key={`${l.kind}:${l.name}:${i}`} className="flex items-center gap-2">
+              <span className="w-12 shrink-0 text-[11px] text-neutral-400">
+                {l.kind === "branch" ? "branch" : detail.provider === "GITLAB" ? "MR" : "PR"}
+              </span>
+              {l.url ? (
+                <a
+                  href={l.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 truncate font-mono text-xs hover:underline"
+                >
+                  {l.name}
+                </a>
+              ) : (
+                <span className="min-w-0 truncate font-mono text-xs">{l.name}</span>
+              )}
+              {l.state && <span className="ml-auto shrink-0 text-[11px] text-neutral-400">{l.state}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {creating && (
+        <form onSubmit={create} className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {repos && repos.length > 1 && (
+              <select
+                value={repo}
+                onChange={(e) => setRepo(e.target.value)}
+                className="input py-1.5 text-sm sm:w-48"
+                aria-label="Repositório"
+              >
+                {repos.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="input min-w-0 flex-1 py-1.5 font-mono text-xs"
+              aria-label="Nome da branch"
+              autoFocus
+            />
+          </div>
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <span className="mr-auto text-[11px] text-neutral-400">
+              A partir da branch principal, vinculada a esta tarefa.
+            </span>
+            <button type="button" onClick={() => setCreating(false)} className="btn-ghost px-2 py-1 text-xs">
+              Cancelar
+            </button>
+            <button type="submit" disabled={busy || !name.trim()} className="btn-primary px-2.5 py-1 text-xs">
+              {busy ? "Criando…" : "Criar branch"}
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
   );
 }
 

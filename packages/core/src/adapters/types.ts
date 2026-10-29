@@ -13,6 +13,13 @@ export interface Credentials {
    * Default: "pat".
    */
   tokenType?: "oauth" | "pat";
+  /**
+   * Escopo do cache de metadados das telas de tarefas (o id da conexão, setado
+   * por `withConnection`). Sem ele, nada é cacheado.
+   */
+  cacheScope?: string;
+  /** Ignora o cache na leitura (ex.: botão "Recarregar"); o valor novo é gravado. */
+  fresh?: boolean;
 }
 
 /** Identidade do usuário no provedor, obtida ao conectar. */

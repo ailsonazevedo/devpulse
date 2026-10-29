@@ -50,11 +50,62 @@ export interface WorkItem {
   updatedAt: string;
 }
 
+export type WorkFieldType = "single_select" | "number" | "text" | "date";
+
+/** Valor de campo: id da opção, número, texto ou data `YYYY-MM-DD`; null = vazio. */
+export type WorkFieldValue = string | number | null;
+
+export interface WorkFieldOption {
+  id: string;
+  name: string;
+  /** cor hex com "#" (quando o provedor informa). */
+  color?: string | null;
+  description?: string | null;
+}
+
+/**
+ * Campo além de título/corpo/estado/labels/responsáveis: tipo, prioridade,
+ * esforço, iteração, milestone, campos de Project… O `id` é opaco e só o
+ * adapter o interpreta (ex.: GitHub `pf:<project>:<field>:<kind>`, Azure o
+ * reference name). `type` (id "type") é o tipo do item em todos os provedores.
+ */
+export interface WorkField {
+  id: string;
+  name: string;
+  type: WorkFieldType;
+  /** opções de `single_select`. */
+  options?: WorkFieldOption[];
+  value: WorkFieldValue;
+  /** agrupamento na UI (ex.: nome do Project no GitHub). */
+  group?: string | null;
+  required?: boolean;
+  /** dica de formato (ex.: "3h 30m"). */
+  hint?: string | null;
+}
+
+/** Branch ou PR/MR ligado à tarefa. */
+export interface WorkLink {
+  kind: "branch" | "pull_request";
+  name: string;
+  url: string | null;
+  /** estado nativo do PR/MR (open, merged…). */
+  state?: string | null;
+}
+
 export interface WorkItemDetail extends WorkItem {
   /** corpo em texto/markdown (HTML do Azure é convertido para texto). */
   body: string;
   /** valores aceitos em `UpdateItemInput.state`. */
   availableStates: string[];
+  /** campos editáveis via `UpdateItemInput.fields`. */
+  fields: WorkField[];
+  /** branches e PRs/MRs vinculados. */
+  links: WorkLink[];
+  /**
+   * Repositórios onde `createBranch` pode criar a branch (null = o próprio
+   * repositório/projeto da tarefa).
+   */
+  branchRepositories: WorkContainer[] | null;
 }
 
 export interface WorkComment {
@@ -91,6 +142,32 @@ export interface CreateItemInput {
   title: string;
   body?: string;
   labels?: string[];
+  /** logins (GitHub/GitLab) ou e-mail/uniqueName (Azure, só o primeiro). */
+  assignees?: string[];
+  /** valores por `WorkField.id` (de `getCreateFields`). */
+  fields?: Record<string, WorkFieldValue>;
+  /** cria já dentro do board, na coluna `columnId` (ids de `getBoard`). */
+  boardId?: string;
+  columnId?: string;
+}
+
+export interface CreateFieldsQuery {
+  containerId?: string;
+  boardId?: string;
+  /** tipo escolhido (Azure: os campos dependem do tipo). */
+  type?: string;
+}
+
+export interface CreateFields {
+  fields: WorkField[];
+  /** repositório/projeto imposto pelo board (null = livre). */
+  container: WorkContainer | null;
+}
+
+export interface CreateBranchInput {
+  name: string;
+  /** repositório (Azure: um de `branchRepositories`; demais: o da tarefa). */
+  repositoryId?: string;
 }
 
 export interface UpdateItemInput {
@@ -101,6 +178,8 @@ export interface UpdateItemInput {
   labels?: string[];
   /** logins (GitHub/GitLab) ou e-mail/uniqueName (Azure, só o primeiro). */
   assignees?: string[];
+  /** valores por `WorkField.id` (de `WorkItemDetail.fields`); null limpa. */
+  fields?: Record<string, WorkFieldValue>;
 }
 
 export interface BoardSummary {
@@ -127,6 +206,8 @@ export interface BoardColumn {
   id: string;
   name: string;
   cards: BoardCard[];
+  /** total de cards na coluna quando só parte foi carregada (null/ausente = todos). */
+  total?: number | null;
 }
 
 export interface Board {
@@ -156,6 +237,16 @@ export interface WorkAdapter {
   listContainers(creds: Credentials): Promise<WorkContainer[]>;
   /** Labels (tags no Azure) disponíveis num repositório/projeto. */
   listLabels(creds: Credentials, containerId: string): Promise<WorkLabel[]>;
+  /** Pessoas que podem ser responsáveis por itens do repositório/projeto. */
+  listAssignees(creds: Credentials, containerId: string): Promise<WorkUser[]>;
+  /** Campos disponíveis ao criar (num repositório/projeto e/ou board). */
+  getCreateFields(creds: Credentials, query: CreateFieldsQuery): Promise<CreateFields>;
+  /** Cria uma branch a partir da principal e a vincula à tarefa. */
+  createBranch(
+    creds: Credentials,
+    ref: string,
+    input: CreateBranchInput,
+  ): Promise<WorkLink>;
   listBoards(creds: Credentials): Promise<BoardSummary[]>;
   getBoard(creds: Credentials, boardId: string): Promise<Board>;
   moveCard(

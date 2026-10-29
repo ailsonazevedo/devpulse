@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { mapGithubCard, mapGithubIssue, type GhIssue } from "./github.js";
-import { distributeGitlabBoard, mapGitlabIssue, type GlIssue } from "./gitlab.js";
-import { azureColumnOf, mapAzureItem } from "./azure.js";
+import {
+  mapGithubCard,
+  mapGithubIssue,
+  columnQuery,
+  mapProjectFields,
+  parseProjectFieldId,
+  type GhIssue,
+} from "./github.js";
+import {
+  applyScopedLabels,
+  distributeGitlabBoard,
+  mapGitlabIssue,
+  scopedLabelFields,
+  type GlIssue,
+} from "./gitlab.js";
+import {
+  azureColumnOf,
+  buildAzureFields,
+  flattenNodes,
+  mapAzureItem,
+  parseArtifactLink,
+} from "./azure.js";
 import { missingWorkScopes } from "./scopes.js";
 import { htmlToText, splitRef, textToHtml } from "./util.js";
 import { workErrorFromStatus, ScopeError, WorkNotFoundError } from "./errors.js";
@@ -172,5 +191,132 @@ describe("Azure", () => {
     expect(azureColumnOf(board, field, w({ [field]: "New" }))).toBe("New");
     expect(azureColumnOf(board, field, w({}))).toBe("Doing");
     expect(azureColumnOf(board, field, w({ "System.State": "Weird" }))).toBeUndefined();
+  });
+});
+
+describe("campos — GitHub Projects", () => {
+  const project = {
+    id: "P1",
+    title: "Roadmap",
+    fields: {
+      nodes: [
+        { id: "F0", name: "Title", dataType: "TITLE" },
+        { id: "FS", name: "Status", dataType: "SINGLE_SELECT", options: [{ id: "o1", name: "Todo" }] },
+        {
+          id: "FP",
+          name: "Priority",
+          dataType: "SINGLE_SELECT",
+          options: [{ id: "p0", name: "P0", color: "RED" }],
+        },
+        { id: "FE", name: "Estimate", dataType: "NUMBER" },
+        {
+          id: "FI",
+          name: "Sprint",
+          dataType: "ITERATION",
+          configuration: { iterations: [{ id: "it1", title: "Sprint 1", startDate: "2026-10-01" }] },
+        },
+        {},
+      ],
+    },
+  };
+
+  it("mapeia tipos suportados, valores e ids pf:*", () => {
+    const fields = mapProjectFields(project, [
+      { optionId: "p0", field: { id: "FP" } },
+      { number: 3, field: { id: "FE" } },
+      { iterationId: "it1", field: { id: "FI" } },
+    ]);
+    expect(fields.map((f) => f.name)).toEqual(["Status", "Priority", "Estimate", "Sprint"]);
+    const prio = fields.find((f) => f.name === "Priority")!;
+    expect(prio).toMatchObject({ id: "pf:P1:FP:s", type: "single_select", value: "p0", group: "Roadmap" });
+    expect(prio.options?.[0]?.color).toBe("#cf222e");
+    expect(fields.find((f) => f.name === "Estimate")).toMatchObject({ type: "number", value: 3 });
+    expect(fields.find((f) => f.name === "Sprint")).toMatchObject({ type: "single_select", value: "it1" });
+    expect(parseProjectFieldId("pf:P1:FE:n")).toEqual({ projectId: "P1", fieldId: "FE", kind: "n" });
+    expect(parseProjectFieldId("milestone")).toBeNull();
+  });
+
+  it("omite Status na criação pelo board", () => {
+    const fields = mapProjectFields(project, [], { includeStatus: false });
+    expect(fields.some((f) => f.name === "Status")).toBe(false);
+  });
+});
+
+describe("campos — GitLab labels com escopo", () => {
+  const labels = [
+    { name: "priority::high", color: "#f00" },
+    { name: "priority::low" },
+    { name: "Doing" },
+  ];
+  it("agrupa por escopo com o valor atual", () => {
+    const [f] = scopedLabelFields(labels, ["Doing", "priority::low"]);
+    expect(f).toMatchObject({ id: "scoped:priority", name: "Priority", value: "priority::low" });
+    expect(f!.options?.map((o) => o.name)).toEqual(["high", "low"]);
+  });
+  it("troca a label do escopo e preserva as demais", () => {
+    expect(applyScopedLabels(["Doing", "priority::low"], { "scoped:priority": "priority::high" })).toEqual([
+      "Doing",
+      "priority::high",
+    ]);
+    expect(applyScopedLabels(["priority::low"], { "scoped:priority": null })).toEqual([]);
+  });
+});
+
+describe("campos — Azure", () => {
+  it("achata a árvore de iterações em caminhos", () => {
+    expect(
+      flattenNodes({ name: "Proj", children: [{ name: "R1", children: [{ name: "S1" }] }] }),
+    ).toEqual(["Proj", "Proj\\R1", "Proj\\R1\\S1"]);
+  });
+
+  it("monta campos conhecidos e Custom.* conforme o tipo", () => {
+    const defs = new Map([
+      ["Microsoft.VSTS.Common.Priority", { referenceName: "x", name: "Priority", type: "integer" }],
+      ["Microsoft.VSTS.Scheduling.Effort", { referenceName: "x", name: "Effort", type: "double" }],
+      ["Custom.Squad", { referenceName: "x", name: "Squad", type: "string" }],
+      ["System.CreatedBy", { referenceName: "x", name: "Created By", type: "identity" }],
+    ]);
+    const fields = buildAzureFields(
+      [
+        { referenceName: "Custom.Squad", name: "Squad", allowedValues: ["A", "B"] },
+        { referenceName: "Microsoft.VSTS.Scheduling.Effort", name: "Effort" },
+        { referenceName: "Microsoft.VSTS.Common.Priority", name: "Priority", allowedValues: ["1", "2"] },
+        { referenceName: "System.IterationPath", name: "Iteration Path" },
+        { referenceName: "System.CreatedBy", name: "Created By" },
+      ],
+      defs,
+      { iterations: ["Proj", "Proj\\S1"], areas: [] },
+      { "Microsoft.VSTS.Common.Priority": 2, "Microsoft.VSTS.Scheduling.Effort": 5 },
+    );
+    expect(fields.map((f) => f.id)).toEqual([
+      "Microsoft.VSTS.Common.Priority",
+      "Microsoft.VSTS.Scheduling.Effort",
+      "System.IterationPath",
+      "Custom.Squad",
+    ]);
+    expect(fields[0]).toMatchObject({ name: "Prioridade", type: "single_select", value: "2" });
+    expect(fields[1]).toMatchObject({ type: "number", value: 5 });
+  });
+
+  it("interpreta links de branch e PR", () => {
+    expect(parseArtifactLink("vstfs:///Git/Ref/p1%2Fr1%2FGBfeature%2Fx")).toEqual({
+      kind: "branch",
+      repoId: "r1",
+      name: "feature/x",
+    });
+    expect(parseArtifactLink("vstfs:///Git/PullRequestId/p1%2Fr1%2F42")).toEqual({
+      kind: "pull_request",
+      repoId: "r1",
+      id: "42",
+    });
+    expect(parseArtifactLink("vstfs:///Build/Build/1")).toBeNull();
+  });
+});
+
+describe("columnQuery (GitHub)", () => {
+  it("filtra por status com aspas escapadas ou sem status", () => {
+    expect(columnQuery("In Progress")).toBe('status:"In Progress"');
+    expect(columnQuery('Say "hi"')).toBe('status:"Say \\"hi\\""');
+    expect(columnQuery(null)).toBe("no:status");
   });
 });

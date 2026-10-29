@@ -26,6 +26,12 @@ async function run(fn: () => Promise<unknown>): Promise<CallToolResult> {
   }
 }
 
+const fieldValues = z
+  .record(z.union([z.string(), z.number(), z.null()]))
+  .describe(
+    "valores por id de campo (WorkField.id de get_task.fields ou get_create_fields): id da opção para single_select, número, texto ou data YYYY-MM-DD; null limpa. \"type\" é o tipo do item.",
+  );
+
 const READ = { readOnlyHint: true, openWorldHint: true } as const;
 const WRITE = { readOnlyHint: false, destructiveHint: false, openWorldHint: true } as const;
 
@@ -68,7 +74,7 @@ export function registerTools(server: McpServer, api: DevPulseClient): void {
     {
       title: "Ler tarefa",
       description:
-        "Detalhe de uma tarefa (corpo, labels, responsáveis, estados aceitos em `availableStates`) e seus comentários.",
+        "Detalhe de uma tarefa: corpo, labels, responsáveis, estados aceitos (`availableStates`), campos editáveis (`fields`: tipo, prioridade, esforço, iteração, milestone, campos de Project…), branches/PRs vinculados (`links`) e comentários.",
       inputSchema: { connectionId, ref },
       annotations: READ,
     },
@@ -87,13 +93,21 @@ export function registerTools(server: McpServer, api: DevPulseClient): void {
     {
       title: "Criar tarefa",
       description:
-        "Cria uma issue/work item num repositório ou projeto. Use list_containers para descobrir o containerId.",
+        "Cria uma issue/work item num repositório ou projeto, opcionalmente já dentro de um board (boardId + columnId de get_board). Use list_containers para o containerId, get_create_fields para os campos e list_assignees para os responsáveis.",
       inputSchema: {
         connectionId,
         containerId: z.string().min(1).describe("id do repositório/projeto (list_containers)"),
         title: z.string().min(1).max(256),
         body: z.string().max(65_000).optional().describe("markdown"),
         labels: z.array(z.string().min(1)).max(20).optional(),
+        assignees: z
+          .array(z.string().min(1))
+          .max(10)
+          .optional()
+          .describe("logins de list_assignees (Azure: só o primeiro)"),
+        fields: fieldValues.optional(),
+        boardId: z.string().min(1).optional(),
+        columnId: z.string().min(1).optional().describe("coluna do board (get_board)"),
       },
       annotations: WRITE,
     },
@@ -106,7 +120,7 @@ export function registerTools(server: McpServer, api: DevPulseClient): void {
     {
       title: "Atualizar tarefa",
       description:
-        "Edita título, corpo, estado (um dos `availableStates` de get_task), labels e/ou responsáveis. Envie só o que muda; labels/assignees substituem a lista inteira.",
+        "Edita título, corpo, estado (um dos `availableStates` de get_task), labels, responsáveis e/ou campos (`fields`, ids de get_task). Envie só o que muda; labels/assignees substituem a lista inteira.",
       inputSchema: {
         connectionId,
         ref,
@@ -118,7 +132,8 @@ export function registerTools(server: McpServer, api: DevPulseClient): void {
           .array(z.string().min(1))
           .max(10)
           .optional()
-          .describe("logins (GitHub/GitLab) ou e-mail (Azure, só o primeiro)"),
+          .describe("logins de list_assignees (Azure: e-mail, só o primeiro)"),
+        fields: fieldValues.optional(),
       },
       annotations: WRITE,
     },
@@ -167,6 +182,62 @@ export function registerTools(server: McpServer, api: DevPulseClient): void {
     },
     ({ connectionId, containerId }) =>
       run(() => api.request(work(connectionId, "/labels"), { query: { container: containerId } })),
+  );
+
+  server.registerTool(
+    "list_assignees",
+    {
+      title: "Listar responsáveis possíveis",
+      description: "Pessoas que podem ser responsáveis por tarefas do repositório/projeto (login, nome).",
+      inputSchema: { connectionId, containerId: z.string().min(1) },
+      annotations: READ,
+    },
+    ({ connectionId, containerId }) =>
+      run(() =>
+        api.request(work(connectionId, "/assignees"), { query: { container: containerId } }),
+      ),
+  );
+
+  server.registerTool(
+    "get_create_fields",
+    {
+      title: "Campos para criar tarefa",
+      description:
+        "Campos disponíveis ao criar uma tarefa num repositório/projeto e/ou board: tipo, prioridade, esforço, iteração, milestone, campos do Project… Retorna `fields` (com opções) e `container` quando o board impõe o projeto. No Azure, informe `type` para ver os campos daquele tipo.",
+      inputSchema: {
+        connectionId,
+        containerId: z.string().min(1).optional(),
+        boardId: z.string().min(1).optional(),
+        type: z.string().min(1).optional(),
+      },
+      annotations: READ,
+    },
+    ({ connectionId, containerId, boardId, type }) =>
+      run(() =>
+        api.request(work(connectionId, "/fields"), {
+          query: { container: containerId, board: boardId, type },
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "create_branch",
+    {
+      title: "Criar branch vinculada",
+      description:
+        "Cria uma branch a partir da principal no repositório da tarefa e a vincula à tarefa (GitHub Development, GitLab branch `<iid>-…`, link no Azure). No Azure, `repositoryId` vem de get_task.branchRepositories.",
+      inputSchema: {
+        connectionId,
+        ref,
+        name: z.string().min(1).max(200).describe("ex.: 123-corrigir-login"),
+        repositoryId: z.string().min(1).optional(),
+      },
+      annotations: WRITE,
+    },
+    ({ connectionId, ref, ...body }) =>
+      run(() =>
+        api.request(work(connectionId, "/item/branch"), { method: "POST", query: { ref }, body }),
+      ),
   );
 
   server.registerTool(

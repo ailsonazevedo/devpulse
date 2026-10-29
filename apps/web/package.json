@@ -13,6 +13,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.7.4",
     "@devpulse/core": "workspace:*",
+    "@tanstack/react-query": "^5.105.0",
     "next": "^15.1.2",
     "next-auth": "^5.0.0-beta.25",
     "react": "^19.0.0",

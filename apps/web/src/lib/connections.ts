@@ -6,6 +6,7 @@ import {
   getAdapter,
   prisma,
 } from "@devpulse/core";
+import { clearConnectionCache } from "@devpulse/core/work";
 
 export interface UpsertConnectionInput {
   userId: string;
@@ -70,5 +71,7 @@ export async function upsertConnection(input: UpsertConnectionInput) {
   });
 
   await enqueueSync(connection.id, "backfill");
+  // Reconectar pode mudar escopos/permissões: descarta metadados em cache.
+  await clearConnectionCache(connection.id);
   return connection;
 }

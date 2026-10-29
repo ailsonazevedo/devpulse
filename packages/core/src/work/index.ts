@@ -25,3 +25,4 @@ export {
   ConnectionNotFoundError,
 } from "../connection-creds.js";
 export { AuthError } from "../adapters/types.js";
+export { clearConnectionCache } from "./cache.js";

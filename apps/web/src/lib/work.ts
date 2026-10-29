@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { ZodError, z } from "zod";
 import {
   AuthError,
   ConnectionNotFoundError,
@@ -11,7 +11,13 @@ import {
   type WorkAdapter,
 } from "@devpulse/core/work";
 import type { Credentials } from "@devpulse/core";
+import { headers } from "next/headers";
 import { getUserId } from "@/lib/api-auth";
+
+/** Valores de campos (`WorkField.id` → valor); null limpa. */
+export const FieldValues = z
+  .record(z.string().min(1).max(300), z.union([z.string().max(2000), z.number(), z.null()]))
+  .refine((r) => Object.keys(r).length <= 60, "campos demais");
 
 /** Categoria do erro devolvida ao client (decide a mensagem/ação na UI). */
 export type WorkErrorKind = "auth" | "scope" | "not_found" | "input" | "provider";
@@ -40,6 +46,9 @@ function errorResponse(err: unknown) {
   return NextResponse.json({ error: message, kind }, { status });
 }
 
+/** Header do client para ignorar o cache de metadados (botão "Recarregar"). */
+export const REFRESH_HEADER = "x-devpulse-refresh";
+
 /**
  * Rota que opera numa conexão do usuário (sessão ou token pessoal), resolve o
  * adapter, executa com credenciais válidas (refresh automático) e converte
@@ -54,8 +63,9 @@ export async function withWorkConnection(
     return NextResponse.json({ error: "não autenticado" }, { status: 401 });
   }
   try {
+    const fresh = (await headers()).get(REFRESH_HEADER) === "1";
     const result = await withConnection(connectionId, userId, (creds, conn) =>
-      fn(getWorkAdapter(conn.provider), creds),
+      fn(getWorkAdapter(conn.provider), fresh ? { ...creds, fresh } : creds),
     );
     return NextResponse.json(result ?? { ok: true });
   } catch (err) {

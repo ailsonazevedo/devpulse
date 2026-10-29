@@ -1,25 +1,8 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { WorkLabel } from "@devpulse/core/work";
-import { workFetch } from "./api";
-
-/** Cache por conexão+container: reabrir o painel não refaz a chamada ao provedor. */
-const cache = new Map<string, Promise<WorkLabel[]>>();
-
-function fetchLabels(connectionId: string, containerId: string): Promise<WorkLabel[]> {
-  const key = `${connectionId}|${containerId}`;
-  let p = cache.get(key);
-  if (!p) {
-    p = workFetch<WorkLabel[]>(
-      `/api/work/${connectionId}/labels?container=${encodeURIComponent(containerId)}`,
-    );
-    // Falha não fica em cache (permite tentar de novo).
-    p.catch(() => cache.delete(key));
-    cache.set(key, p);
-  }
-  return p;
-}
+import { useLabels } from "./queries";
 
 /**
  * Seleção de labels com busca entre as existentes no repositório/projeto.
@@ -39,30 +22,14 @@ export function LabelPicker({
   onChange: (labels: string[]) => void;
   placeholder?: string;
 }) {
-  const [available, setAvailable] = useState<WorkLabel[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  const labelsQuery = useLabels(connectionId, containerId);
+  const available = labelsQuery.data ?? (labelsQuery.isError ? [] : null);
+  const failed = labelsQuery.isError;
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
-
-  useEffect(() => {
-    if (!containerId) return;
-    let alive = true;
-    setAvailable(null);
-    setFailed(false);
-    fetchLabels(connectionId, containerId)
-      .then((l) => alive && setAvailable(l))
-      .catch(() => {
-        if (!alive) return;
-        setAvailable([]);
-        setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [connectionId, containerId]);
 
   const byName = new Map((available ?? []).map((l) => [l.name.toLowerCase(), l]));
   const q = query.trim();

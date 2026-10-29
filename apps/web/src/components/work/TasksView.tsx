@@ -1,42 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { Provider } from "@devpulse/core";
 import type { WorkItem } from "@devpulse/core/work";
 import { providerMeta, relativeTime } from "@/components/labels";
 import { ProviderIcon, RefreshIcon } from "@/components/icons";
-import { friendlyError, workFetch, type WorkConnection } from "./api";
+import { friendlyError, type WorkConnection } from "./api";
 import { ReconnectBanner } from "./ReconnectBanner";
 import { TaskDrawer } from "./TaskDrawer";
 import { NewTaskDialog } from "./NewTaskDialog";
 import { Avatars, LabelChips, StateBadge } from "./bits";
+import {
+  prefetchTask,
+  tasksQuery,
+  useTasks,
+  workKeys,
+  type ItemsResponse,
+  type ListItem,
+  type TaskFilters,
+} from "./queries";
 
-export type ListItem = WorkItem & { connectionId: string };
-
-interface ItemsResponse {
-  items: ListItem[];
-  nextCursor: string | null;
-  totals: Record<string, number | null>;
-  errors: { connectionId: string; kind: string; message: string }[];
-}
-
-export interface TaskFilters {
-  provider?: Provider;
-  state: "open" | "closed" | "all";
-  involvement: "assigned" | "created";
-  q: string;
-}
-
-function toQuery(f: TaskFilters, cursor?: string | null): string {
-  const p = new URLSearchParams();
-  if (f.provider) p.set("provider", f.provider);
-  if (f.state !== "open") p.set("state", f.state);
-  if (f.involvement !== "assigned") p.set("involvement", f.involvement);
-  if (f.q.trim()) p.set("q", f.q.trim());
-  if (cursor) p.set("cursor", cursor);
-  return p.toString();
-}
+export type { ListItem, TaskFilters };
 
 export function TasksView({
   connections,
@@ -49,69 +35,42 @@ export function TasksView({
   const pathname = usePathname();
   const [filters, setFilters] = useState<TaskFilters>(initial);
   const [search, setSearch] = useState(initial.q);
-  const [items, setItems] = useState<ListItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [errors, setErrors] = useState<ItemsResponse["errors"]>([]);
-  /** Totais da 1ª página (o filtro não muda ao paginar). */
-  const [totals, setTotals] = useState<ItemsResponse["totals"]>({});
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [fatal, setFatal] = useState<string | null>(null);
   const [open, setOpen] = useState<ListItem | null>(null);
   const [creating, setCreating] = useState(false);
-  /** Descarta respostas de filtros antigos (troca rápida de filtro). */
-  const reqId = useRef(0);
+  const qc = useQueryClient();
 
-  const load = useCallback(async (f: TaskFilters) => {
-    const id = ++reqId.current;
-    setLoading(true);
-    setFatal(null);
-    try {
-      const res = await workFetch<ItemsResponse>(`/api/work/items?${toQuery(f)}`);
-      if (id !== reqId.current) return;
-      setItems(res.items);
-      setCursor(res.nextCursor);
-      setErrors(res.errors);
-      setTotals(res.totals);
-    } catch (err) {
-      if (id === reqId.current) setFatal(friendlyError(err));
-    } finally {
-      if (id === reqId.current) setLoading(false);
-    }
-  }, []);
+  const query = useTasks(filters);
+  const pages = query.data?.pages ?? [];
+  const items = pages.flatMap((p) => p.items);
+  /** erros da última página; totais da 1ª (o filtro não muda ao paginar). */
+  const errors = pages.at(-1)?.errors ?? [];
+  const totals = pages[0]?.totals ?? {};
+  const loading = query.isFetching && !query.isFetchingNextPage;
+  const fatal = query.error && !query.data ? friendlyError(query.error) : null;
 
   useEffect(() => {
-    void load(filters);
-    const qs = toQuery(filters);
+    const qs = tasksQuery(filters);
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [filters, load, pathname, router]);
-
-  async function loadMore() {
-    if (!cursor) return;
-    setLoadingMore(true);
-    try {
-      const res = await workFetch<ItemsResponse>(`/api/work/items?${toQuery(filters, cursor)}`);
-      setItems((prev) => [...prev, ...res.items]);
-      setCursor(res.nextCursor);
-      setErrors(res.errors);
-    } catch (err) {
-      setFatal(friendlyError(err));
-    } finally {
-      setLoadingMore(false);
-    }
-  }
+  }, [filters, pathname, router]);
 
   const patch = (p: Partial<TaskFilters>) => setFilters((f) => ({ ...f, ...p }));
   const providers = [...new Set(connections.map((c) => c.provider))];
   const connById = new Map(connections.map((c) => [c.id, c]));
 
+  /** Atualiza a linha no cache na hora (a revalidação vem em seguida). */
   function onItemChanged(updated: WorkItem, connectionId: string) {
-    setItems((prev) =>
-      prev.map((it) =>
-        it.ref === updated.ref && it.connectionId === connectionId
-          ? { ...updated, connectionId }
-          : it,
-      ),
+    qc.setQueryData<InfiniteData<ItemsResponse>>(workKeys.tasks(filters), (data) =>
+      data && {
+        ...data,
+        pages: data.pages.map((p) => ({
+          ...p,
+          items: p.items.map((it) =>
+            it.ref === updated.ref && it.connectionId === connectionId
+              ? { ...updated, connectionId }
+              : it,
+          ),
+        })),
+      },
     );
   }
 
@@ -168,7 +127,7 @@ export function TasksView({
             />
           </form>
           <button
-            onClick={() => void load(filters)}
+            onClick={() => void query.refetch()}
             className="btn-ghost px-2.5 py-1.5 text-xs"
             title="Recarregar"
           >
@@ -221,6 +180,7 @@ export function TasksView({
             <li key={`${it.connectionId}:${it.ref}`}>
               <button
                 onClick={() => setOpen(it)}
+                onMouseEnter={() => prefetchTask(qc, it.connectionId, it.ref)}
                 className="flex w-full items-start gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
               >
                 <span
@@ -251,13 +211,13 @@ export function TasksView({
         </ul>
       )}
 
-      {cursor && (
+      {query.hasNextPage && (
         <button
-          onClick={() => void loadMore()}
-          disabled={loadingMore}
+          onClick={() => void query.fetchNextPage()}
+          disabled={query.isFetchingNextPage}
           className="btn-ghost self-center text-xs"
         >
-          {loadingMore ? "Carregando…" : "Carregar mais"}
+          {query.isFetchingNextPage ? "Carregando…" : "Carregar mais"}
         </button>
       )}
 
@@ -276,7 +236,13 @@ export function TasksView({
           onCreated={(it, connectionId) => {
             setCreating(false);
             const row = { ...it, connectionId };
-            setItems((prev) => [row, ...prev]);
+            qc.setQueryData<InfiniteData<ItemsResponse>>(workKeys.tasks(filters), (data) =>
+              data && {
+                ...data,
+                pages: data.pages.map((p, i) => (i === 0 ? { ...p, items: [row, ...p.items] } : p)),
+              },
+            );
+            void qc.invalidateQueries({ queryKey: workKeys.tasks() });
             setOpen(row);
           }}
         />

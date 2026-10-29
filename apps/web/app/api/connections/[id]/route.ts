@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { prisma } from "@devpulse/core";
+import { clearConnectionCache } from "@devpulse/core/work";
 import { auth } from "@/auth";
 
 /** Desconecta: apaga tokens + atividades da conexão (isolado por userId). */
@@ -20,5 +21,6 @@ export async function DELETE(
   if (result.count === 0) {
     return NextResponse.json({ error: "não encontrado" }, { status: 404 });
   }
+  await clearConnectionCache(id);
   return NextResponse.json({ ok: true });
 }

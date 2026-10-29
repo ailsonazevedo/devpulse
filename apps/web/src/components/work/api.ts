@@ -21,15 +21,23 @@ export class WorkApiError extends Error {
   }
 }
 
-/** fetch JSON das rotas /api/work; erros viram WorkApiError com `kind`. */
+/**
+ * fetch JSON das rotas /api/work; erros viram WorkApiError com `kind`.
+ * `refresh` ignora o cache de metadados do servidor (botão "Recarregar").
+ */
 export async function workFetch<T>(
   url: string,
-  init?: { method?: string; body?: unknown },
+  init?: { method?: string; body?: unknown; refresh?: boolean; signal?: AbortSignal },
 ): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (init?.body !== undefined) headers["Content-Type"] = "application/json";
+  // mesmo nome de REFRESH_HEADER em src/lib/work.ts
+  if (init?.refresh) headers["x-devpulse-refresh"] = "1";
   const res = await fetch(url, {
     method: init?.method ?? "GET",
-    headers: init?.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    headers,
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    signal: init?.signal,
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {

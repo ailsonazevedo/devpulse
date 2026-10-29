@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import type { Board, BoardCard, BoardSummary } from "@devpulse/core/work";
 import { providerMeta } from "@/components/labels";
@@ -9,6 +10,8 @@ import { friendlyError, workFetch, type WorkConnection } from "./api";
 import { Avatars, LabelChips } from "./bits";
 import { ReconnectBanner } from "./ReconnectBanner";
 import { TaskDrawer } from "./TaskDrawer";
+import { NewTaskDialog, type BoardTarget } from "./NewTaskDialog";
+import { prefetchTask, useBoard, useBoards, useRefresh, workKeys } from "./queries";
 
 export function BoardsView({
   connections,
@@ -26,82 +29,72 @@ export function BoardsView({
       ? initialConnection!
       : (connections[0]?.id ?? ""),
   );
-  const [boards, setBoards] = useState<BoardSummary[] | null>(null);
   const [boardId, setBoardId] = useState("");
-  const [board, setBoard] = useState<Board | null>(null);
-  const [loadingBoard, setLoadingBoard] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [openCard, setOpenCard] = useState<BoardCard | null>(null);
+  const [newIn, setNewIn] = useState<BoardTarget | null>(null);
   /** Board pedido na URL: só vale para a conexão inicial. */
   const pendingBoard = useRef(initialBoard);
+  const qc = useQueryClient();
+  const refresh = useRefresh();
 
   const connection = connections.find((c) => c.id === connectionId);
+  const boardsQuery = useBoards(connectionId);
+  const boards: BoardSummary[] | null =
+    boardsQuery.data ?? (boardsQuery.isError ? [] : null);
+  const boardQuery = useBoard(connectionId, boardId);
+  const board = boardQuery.data ?? null;
+  const loadingBoard = boardQuery.isFetching || refreshing;
+  const queryError = boardsQuery.error ?? boardQuery.error;
+
+  // Escolhe o board: o da URL (1ª vez) ou o primeiro da lista.
+  useEffect(() => {
+    const list = boardsQuery.data;
+    if (!list) return;
+    if (boardId && list.some((b) => b.id === boardId)) return;
+    const wanted = pendingBoard.current;
+    pendingBoard.current = undefined;
+    setBoardId(wanted && list.some((b) => b.id === wanted) ? wanted : (list[0]?.id ?? ""));
+  }, [boardsQuery.data, boardId]);
 
   useEffect(() => {
-    if (!connectionId) return;
-    let alive = true;
-    setBoards(null);
-    setBoard(null);
-    setBoardId("");
-    setError(null);
-    workFetch<BoardSummary[]>(`/api/work/${connectionId}/boards`)
-      .then((list) => {
-        if (!alive) return;
-        const wanted = pendingBoard.current;
-        pendingBoard.current = undefined;
-        setBoards(list);
-        const keep = wanted && list.some((b) => b.id === wanted);
-        setBoardId(keep ? wanted : (list[0]?.id ?? ""));
-      })
-      .catch((e) => {
-        if (!alive) return;
-        setBoards([]);
-        setError(friendlyError(e));
-      });
-    return () => {
-      alive = false;
-    };
-  }, [connectionId]);
-
-  const loadBoard = useCallback(async () => {
-    if (!connectionId || !boardId) return;
-    setLoadingBoard(true);
-    setError(null);
-    try {
-      const b = await workFetch<Board>(
-        `/api/work/${connectionId}/board?id=${encodeURIComponent(boardId)}`,
-      );
-      setBoard(b);
-    } catch (e) {
-      setBoard(null);
-      setError(friendlyError(e));
-    } finally {
-      setLoadingBoard(false);
-    }
-  }, [connectionId, boardId]);
-
-  useEffect(() => {
-    void loadBoard();
     const p = new URLSearchParams();
     if (connectionId) p.set("connection", connectionId);
     if (boardId) p.set("board", boardId);
     router.replace(`${pathname}?${p.toString()}`, { scroll: false });
-  }, [loadBoard, connectionId, boardId, pathname, router]);
+  }, [connectionId, boardId, pathname, router]);
 
-  /** Move otimista: atualiza a UI e desfaz se o provedor recusar. */
+  /** "Recarregar": ignora também o cache de metadados do servidor (colunas, boards). */
+  async function reload() {
+    if (!connectionId || !boardId) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      await Promise.all([refresh.board(connectionId, boardId), refresh.boards(connectionId)]);
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  /** Move otimista no cache: atualiza a UI e desfaz se o provedor recusar. */
   async function move(cardId: string, toColumnId: string) {
     if (!board) return;
     const from = board.columns.find((c) => c.cards.some((x) => x.id === cardId));
     if (!from || from.id === toColumnId) return;
     const card = from.cards.find((x) => x.id === cardId)!;
+    const key = workKeys.board(connectionId, board.id);
     const before = board;
-    setBoard({
+    await qc.cancelQueries({ queryKey: key });
+    qc.setQueryData<Board>(key, {
       ...board,
       columns: board.columns.map((c) =>
         c.id === from.id
-          ? { ...c, cards: c.cards.filter((x) => x.id !== cardId) }
+          ? { ...c, cards: c.cards.filter((x) => x.id !== cardId), total: c.total && c.total - 1 }
           : c.id === toColumnId
-            ? { ...c, cards: [card, ...c.cards] }
+            ? { ...c, cards: [card, ...c.cards], total: c.total && c.total + 1 }
             : c,
       ),
     });
@@ -111,11 +104,15 @@ export function BoardsView({
         method: "POST",
         body: { boardId: board.id, cardId, toColumnId },
       });
+      void qc.invalidateQueries({ queryKey: workKeys.tasks() });
+      if (card.ref) void qc.invalidateQueries({ queryKey: workKeys.item(connectionId, card.ref) });
     } catch (e) {
-      setBoard(before);
+      qc.setQueryData(key, before);
       setError(`Não foi possível mover o card: ${friendlyError(e)}`);
     }
   }
+
+  const shownError = error ?? (queryError ? friendlyError(queryError) : null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -124,7 +121,11 @@ export function BoardsView({
       <div className="flex flex-wrap items-center gap-2">
         <select
           value={connectionId}
-          onChange={(e) => setConnectionId(e.target.value)}
+          onChange={(e) => {
+            setConnectionId(e.target.value);
+            setBoardId("");
+            setError(null);
+          }}
           className="input py-1.5 text-sm"
           aria-label="Conta"
         >
@@ -150,8 +151,8 @@ export function BoardsView({
           ))}
         </select>
         <button
-          onClick={() => void loadBoard()}
-          disabled={!boardId}
+          onClick={() => void reload()}
+          disabled={!boardId || refreshing}
           className="btn-ghost px-2.5 py-1.5 text-xs"
           title="Recarregar"
         >
@@ -178,9 +179,9 @@ export function BoardsView({
         </p>
       )}
 
-      {error && (
+      {shownError && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-          {error}
+          {shownError}
         </p>
       )}
 
@@ -190,6 +191,15 @@ export function BoardsView({
           dimmed={loadingBoard}
           onMove={(cardId, col) => void move(cardId, col)}
           onOpen={(card) => card.ref && setOpenCard(card)}
+          onHover={(card) => card.ref && prefetchTask(qc, connectionId, card.ref)}
+          onCreate={(columnId) =>
+            setNewIn({
+              id: board.id,
+              name: board.name,
+              columns: board.columns.map((c) => ({ id: c.id, name: c.name })),
+              columnId,
+            })
+          }
         />
       ) : (
         loadingBoard && (
@@ -204,6 +214,19 @@ export function BoardsView({
         )
       )}
 
+      {newIn && connection && (
+        <NewTaskDialog
+          connections={[connection]}
+          board={newIn}
+          onClose={() => setNewIn(null)}
+          onCreated={() => {
+            setNewIn(null);
+            void qc.invalidateQueries({ queryKey: workKeys.board(connectionId, newIn.id) });
+            void qc.invalidateQueries({ queryKey: workKeys.tasks() });
+          }}
+        />
+      )}
+
       {openCard?.ref && connection && (
         <TaskDrawer
           connection={connection}
@@ -215,7 +238,7 @@ export function BoardsView({
             number: openCard.number ?? "",
           }}
           onClose={() => setOpenCard(null)}
-          onChanged={() => void loadBoard()}
+          onChanged={() => void qc.invalidateQueries({ queryKey: workKeys.board(connectionId, boardId) })}
         />
       )}
     </div>
@@ -227,11 +250,15 @@ function Kanban({
   dimmed,
   onMove,
   onOpen,
+  onCreate,
+  onHover,
 }: {
   board: Board;
   dimmed: boolean;
   onMove: (cardId: string, toColumnId: string) => void;
   onOpen: (card: BoardCard) => void;
+  onCreate: (columnId: string) => void;
+  onHover: (card: BoardCard) => void;
 }) {
   const [over, setOver] = useState<string | null>(null);
 
@@ -263,9 +290,22 @@ function Kanban({
               : "border-transparent")
           }
         >
-          <h3 className="flex items-center justify-between px-3 py-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
+          <h3 className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300">
             <span className="truncate">{col.name}</span>
-            <span className="text-neutral-400">{col.cards.length}</span>
+            <span
+              className="text-neutral-400"
+              title={col.total ? `Mostrando ${col.cards.length} de ${col.total}` : undefined}
+            >
+              {col.total ? `${col.cards.length} de ${col.total}` : col.cards.length}
+            </span>
+            <button
+              onClick={() => onCreate(col.id)}
+              aria-label={`Nova tarefa em ${col.name}`}
+              title="Nova tarefa nesta coluna"
+              className="ml-auto rounded-md px-1.5 text-base leading-none text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            >
+              +
+            </button>
           </h3>
           <ul className="flex min-h-16 flex-col gap-2 overflow-y-auto px-2 pb-2">
             {col.cards.map((card) => (
@@ -277,6 +317,7 @@ function Kanban({
                   e.dataTransfer.effectAllowed = "move";
                 }}
                 onClick={() => onOpen(card)}
+                onMouseEnter={() => onHover(card)}
                 className={
                   "card cursor-grab px-3 py-2 text-sm active:cursor-grabbing " +
                   (card.ref ? "hover:border-neutral-300 dark:hover:border-neutral-700" : "")

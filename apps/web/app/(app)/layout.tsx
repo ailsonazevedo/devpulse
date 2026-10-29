@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, signOut } from "@/auth";
 import { NavLinks } from "@/components/NavLinks";
+import { QueryProvider } from "@/components/QueryProvider";
 import { LogOutIcon, LogoMark } from "@/components/icons";
 
 export default async function AppLayout({
@@ -50,7 +51,7 @@ export default async function AppLayout({
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </main>
     </div>
   );

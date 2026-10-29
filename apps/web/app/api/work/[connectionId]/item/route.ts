@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { withWorkConnection } from "@/lib/work";
+import { FieldValues, withWorkConnection } from "@/lib/work";
 
 const Ref = z.string().min(1, "ref obrigatória");
 
@@ -11,6 +11,7 @@ const UpdateBody = z
     state: z.string().min(1),
     labels: z.array(z.string().trim().min(1)).max(50),
     assignees: z.array(z.string().trim().min(1)).max(10),
+    fields: FieldValues,
   })
   .partial();
 
@@ -26,7 +27,7 @@ export async function GET(
   );
 }
 
-/** Edita título, corpo, estado, labels e/ou responsáveis. */
+/** Edita título, corpo, estado, labels, responsáveis e/ou campos. */
 export async function PATCH(
   req: NextRequest,
   ctx: { params: Promise<{ connectionId: string }> },
