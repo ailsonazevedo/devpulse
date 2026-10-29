@@ -23,6 +23,22 @@ model User {
   connections ProviderConnection[]
   activities  Activity[]
   dailyContributions DailyContribution[]
+  apiTokens   ApiToken[]
+}
+
+/// Token pessoal de API (Bearer) para clientes como o MCP do Claude Code.
+/// Só o hash sha256 fica salvo; o token é exibido uma única vez.
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String
+  tokenHash  String    @unique
+  prefix     String // início do token, só para exibição
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // Auth.js (NextAuth) Prisma adapter models

@@ -11,7 +11,7 @@ import {
   type WorkAdapter,
 } from "@devpulse/core/work";
 import type { Credentials } from "@devpulse/core";
-import { auth } from "@/auth";
+import { getUserId } from "@/lib/api-auth";
 
 /** Categoria do erro devolvida ao client (decide a mensagem/ação na UI). */
 export type WorkErrorKind = "auth" | "scope" | "not_found" | "input" | "provider";
@@ -41,7 +41,7 @@ function errorResponse(err: unknown) {
 }
 
 /**
- * Rota que opera numa conexão do usuário logado: checa a sessão, resolve o
+ * Rota que opera numa conexão do usuário (sessão ou token pessoal), resolve o
  * adapter, executa com credenciais válidas (refresh automático) e converte
  * erros de domínio em status HTTP.
  */
@@ -49,12 +49,12 @@ export async function withWorkConnection(
   connectionId: string,
   fn: (adapter: WorkAdapter, creds: Credentials) => Promise<unknown>,
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json({ error: "não autenticado" }, { status: 401 });
   }
   try {
-    const result = await withConnection(connectionId, session.user.id, (creds, conn) =>
+    const result = await withConnection(connectionId, userId, (creds, conn) =>
       fn(getWorkAdapter(conn.provider), creds),
     );
     return NextResponse.json(result ?? { ok: true });

@@ -1,4 +1,4 @@
-import type { Provider } from "@devpulse/core";
+import { prisma, type Provider } from "@devpulse/core";
 import { auth } from "@/auth";
 import { getConnections } from "@/lib/queries";
 import { isOAuthConfigured } from "@/lib/oauth";
@@ -7,6 +7,8 @@ import {
   ConnectionsManager,
   type ConnectionView,
 } from "@/components/ConnectionsManager";
+import { ApiTokensCard } from "@/components/ApiTokensCard";
+import { env } from "@/env";
 
 export default async function ConnectionsPage({
   searchParams,
@@ -17,7 +19,14 @@ export default async function ConnectionsPage({
   const userId = session!.user.id;
   const sp = await searchParams;
 
-  const rows = await getConnections(userId);
+  const [rows, apiTokens] = await Promise.all([
+    getConnections(userId),
+    prisma.apiToken.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, prefix: true, lastUsedAt: true, createdAt: true },
+    }),
+  ]);
   const connections: ConnectionView[] = rows.map((c) => ({
     id: c.id,
     provider: c.provider,
@@ -61,6 +70,17 @@ export default async function ConnectionsPage({
         connections={connections}
         oauthConfigured={oauthConfigured}
       />
+
+      <section className="card p-5">
+        <ApiTokensCard
+          initialTokens={apiTokens.map((t) => ({
+            ...t,
+            lastUsedAt: t.lastUsedAt?.toISOString() ?? null,
+            createdAt: t.createdAt.toISOString(),
+          }))}
+          baseUrl={env.AUTH_URL.replace(/\/$/, "")}
+        />
+      </section>
     </div>
   );
 }

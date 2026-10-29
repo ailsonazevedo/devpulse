@@ -7,6 +7,7 @@ import { ExternalLinkIcon, ProviderIcon } from "@/components/icons";
 import { friendlyError, itemUrl, workFetch, type WorkConnection } from "./api";
 import { Avatars, StateBadge } from "./bits";
 import { LabelPicker } from "./LabelPicker";
+import { buildClaudeCommand } from "./claude";
 
 const splitList = (s: string) =>
   s
@@ -42,6 +43,7 @@ export function TaskDrawer({
 
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
 
   function fill(d: WorkItemDetail) {
     setDetail(d);
@@ -122,6 +124,16 @@ export function TaskDrawer({
     }
   }
 
+  async function copyClaudeCommand() {
+    try {
+      await navigator.clipboard.writeText(buildClaudeCommand(connection.id, item));
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2500);
+    } catch {
+      setError("Não foi possível copiar o comando.");
+    }
+  }
+
   const dirty = Object.keys(changes()).length > 0;
   const closedState = detail?.availableStates.find((s) => /^(closed|done)$/i.test(s));
   const openState = detail?.availableStates.find((s) => /^(open|opened|new|active|to do)$/i.test(s));
@@ -147,6 +159,13 @@ export function TaskDrawer({
           >
             Abrir no provedor <ExternalLinkIcon className="h-3.5 w-3.5" />
           </a>
+          <button
+            onClick={() => void copyClaudeCommand()}
+            title="Copia um comando para colar no terminal do repositório (requer o MCP devpulse)"
+            className="btn-ghost px-2 py-1 text-xs"
+          >
+            {copiedCmd ? "Copiado — cole no terminal" : "Iniciar no Claude Code"}
+          </button>
           <button onClick={onClose} className="btn-ghost px-2 py-1 text-xs">
             Fechar
           </button>

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "devpulse": {
+      "command": "node",
+      "args": ["apps/mcp/dist/index.js"],
+      "env": {
+        "DEVPULSE_URL": "${DEVPULSE_URL:-http://localhost:3000}",
+        "DEVPULSE_TOKEN": "${DEVPULSE_TOKEN}"
+      }
+    }
+  }
+}

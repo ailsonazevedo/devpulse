@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@devpulse/core";
 import { getWorkAdapter, withConnection, type WorkItem } from "@devpulse/core/work";
-import { auth } from "@/auth";
+import { getUserId } from "@/lib/api-auth";
 import { classifyWorkError, type WorkErrorKind } from "@/lib/work";
 
 const Query = z.object({
@@ -39,11 +39,10 @@ export interface ItemsResponse {
  * Falha de um provedor não derruba os demais (volta em `errors`).
  */
 export async function GET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const userId = await getUserId();
+  if (!userId) {
     return NextResponse.json({ error: "não autenticado" }, { status: 401 });
   }
-  const userId = session.user.id;
   const parsed = Query.safeParse(Object.fromEntries(req.nextUrl.searchParams));
   if (!parsed.success) {
     return NextResponse.json({ error: "filtro inválido", kind: "input" }, { status: 400 });

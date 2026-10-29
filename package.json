@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "pnpm --filter @devpulse/web dev",
     "dev:worker": "pnpm --filter @devpulse/worker dev",
+    "dev:mcp": "pnpm --filter @devpulse/mcp dev",
+    "build:mcp": "pnpm --filter @devpulse/mcp build",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
